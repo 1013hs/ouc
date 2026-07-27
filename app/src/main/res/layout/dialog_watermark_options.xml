@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <CheckBox
+            android:id="@+id/cbLatLng"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="经纬度"
+            android:checked="true" />
+
+        <CheckBox
+            android:id="@+id/cbAltitude"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="海拔"
+            android:checked="true" />
+
+        <CheckBox
+            android:id="@+id/cbAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="地点（地址）"
+            android:checked="true" />
+
+        <CheckBox
+            android:id="@+id/cbTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="时间"
+            android:checked="true" />
+
+        <CheckBox
+            android:id="@+id/cbAttitude"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="当前产状（走向/倾角/倾向）"
+            android:checked="true" />
+
+        <CheckBox
+            android:id="@+id/cbNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="备注"
+            android:checked="false" />
+
+        <EditText
+            android:id="@+id/etNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="备注内容（勾选备注时生效）"
+            android:inputType="text" />
+    </LinearLayout>
+</ScrollView>
