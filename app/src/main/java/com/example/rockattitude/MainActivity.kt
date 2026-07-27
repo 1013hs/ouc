@@ -2,19 +2,24 @@ package com.example.rockattitude
 
 import android.Manifest
 import android.content.ContentValues
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Geocoder
 import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.widget.Button
 import android.widget.CheckBox
@@ -32,16 +37,15 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
+class MainActivity : AppCompatActivity(), SensorEventListener {
 
-    private lateinit var sensorManager: android.hardware.SensorManager
-    private var accelerometer: android.hardware.Sensor? = null
-    private var magnetometer: android.hardware.Sensor? = null
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var magnetometer: Sensor? = null
 
     private val gravity = FloatArray(3)
     private val geomagnetic = FloatArray(3)
@@ -111,9 +115,9 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
-        sensorManager = getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager
-        accelerometer = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
-        magnetometer = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_MAGNETIC_FIELD)
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
 
         btnSave.setOnClickListener { saveCurrent() }
         btnCamera.setOnClickListener { checkPermissionsAndOpenCamera() }
@@ -122,10 +126,10 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
     override fun onResume() {
         super.onResume()
         accelerometer?.also {
-            sensorManager.registerListener(this, it, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
         magnetometer?.also {
-            sensorManager.registerListener(this, it, android.hardware.SensorManager.SENSOR_DELAY_UI)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
     }
 
@@ -134,15 +138,15 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
         sensorManager.unregisterListener(this)
     }
 
-    override fun onSensorChanged(event: android.hardware.SensorEvent) {
+    override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
-            android.hardware.Sensor.TYPE_ACCELEROMETER ->
+            Sensor.TYPE_ACCELEROMETER ->
                 System.arraycopy(event.values, 0, gravity, 0, 3)
-            android.hardware.Sensor.TYPE_MAGNETIC_FIELD ->
+            Sensor.TYPE_MAGNETIC_FIELD ->
                 System.arraycopy(event.values, 0, geomagnetic, 0, 3)
         }
 
-        if (android.hardware.SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
+        if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
             val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
             currentAttitude = att
             tvStrike.text = "走向: ${"%.1f".format(att.strike)}°"
@@ -151,7 +155,7 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
         }
     }
 
-    override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun saveCurrent() {
         val att = currentAttitude ?: run {
@@ -288,25 +292,57 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
     }
 
     private fun processAndSaveWatermarkedPhoto(file: File) {
-        Toast.makeText(this, "正在处理水印...", Toast.LENGTH_SHORT).show()
-
-        // 获取位置
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        val cancellationToken = CancellationTokenSource()
+        Toast.makeText(this, "正在获取位置并添加水印...", Toast.LENGTH_SHORT).show()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            == PackageManager.PERMISSION_GRANTED
+            != PackageManager.PERMISSION_GRANTED
         ) {
-            fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                cancellationToken.token
-            ).addOnSuccessListener { location ->
-                addWatermarkAndSave(file, location)
-            }.addOnFailureListener {
-                addWatermarkAndSave(file, null)
-            }
-        } else {
             addWatermarkAndSave(file, null)
+            return
+        }
+
+        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        // 1. 先尝试获取最近一次位置（最快）
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { lastLocation ->
+                if (lastLocation != null) {
+                    addWatermarkAndSave(file, lastLocation)
+                } else {
+                    requestFreshLocation(fusedLocationClient, file)
+                }
+            }
+            .addOnFailureListener {
+                requestFreshLocation(fusedLocationClient, file)
+            }
+    }
+
+    private fun requestFreshLocation(
+        fusedLocationClient: com.google.android.gms.location.FusedLocationProviderClient,
+        file: File
+    ) {
+        val cancellationToken = CancellationTokenSource()
+
+        // 10秒超时保护
+        val timeoutHandler = Handler(Looper.getMainLooper())
+        val timeoutRunnable = Runnable {
+            cancellationToken.cancel()
+            addWatermarkAndSave(file, null)
+        }
+        timeoutHandler.postDelayed(timeoutRunnable, 10000)
+
+        fusedLocationClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY,
+            cancellationToken.token
+        ).addOnSuccessListener { location ->
+            timeoutHandler.removeCallbacks(timeoutRunnable)
+            addWatermarkAndSave(file, location)
+        }.addOnFailureListener {
+            timeoutHandler.removeCallbacks(timeoutRunnable)
+            // 最后再试一次 lastLocation
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { loc -> addWatermarkAndSave(file, loc) }
+                .addOnFailureListener { addWatermarkAndSave(file, null) }
         }
     }
 
@@ -322,54 +358,75 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
             val canvas = Canvas(result)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
-                textSize = result.width * 0.035f   // 根据图片宽度自适应字号
-                setShadowLayer(4f, 2f, 2f, Color.BLACK)
+                textSize = (result.width * 0.032f).coerceAtLeast(28f)
+                setShadowLayer(5f, 2f, 2f, Color.BLACK)
             }
 
             val lines = mutableListOf<String>()
 
+            // 时间
             if (watermarkOptions.time) {
                 val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
                 lines.add("时间: $timeStr")
             }
 
+            // 位置信息
             if (location != null) {
                 if (watermarkOptions.latLng) {
                     lines.add("经度: ${"%.6f".format(location.longitude)}")
                     lines.add("纬度: ${"%.6f".format(location.latitude)}")
                 }
-                if (watermarkOptions.altitude && location.hasAltitude()) {
-                    lines.add("海拔: ${"%.1f".format(location.altitude)} m")
+                if (watermarkOptions.altitude) {
+                    if (location.hasAltitude()) {
+                        lines.add("海拔: ${"%.1f".format(location.altitude)} m")
+                    } else {
+                        lines.add("海拔: 无数据")
+                    }
                 }
                 if (watermarkOptions.address) {
                     val address = getAddressFromLocation(location.latitude, location.longitude)
-                    if (address.isNotBlank()) lines.add("地点: $address")
+                    if (address.isNotBlank()) {
+                        lines.add("地点: $address")
+                    } else {
+                        lines.add("地点: 地址解析失败")
+                    }
+                }
+            } else {
+                if (watermarkOptions.latLng || watermarkOptions.altitude || watermarkOptions.address) {
+                    lines.add("位置: 获取失败（请开启GPS后重试）")
                 }
             }
 
+            // 当前产状
             if (watermarkOptions.attitude && currentAttitude != null) {
                 val att = currentAttitude!!
-                lines.add("走向: ${"%.1f".format(att.strike)}°  倾角: ${"%.1f".format(att.dip)}°  倾向: ${"%.1f".format(att.dipDirection)}°")
+                lines.add(
+                    "走向: ${"%.1f".format(att.strike)}°  " +
+                    "倾角: ${"%.1f".format(att.dip)}°  " +
+                    "倾向: ${"%.1f".format(att.dipDirection)}°"
+                )
             }
 
+            // 备注
             if (watermarkOptions.note && watermarkOptions.noteText.isNotBlank()) {
                 lines.add("备注: ${watermarkOptions.noteText}")
             }
 
-            // 从底部往上画，留一点边距
-            var y = result.height - 30f
+            // 从底部往上绘制
+            var y = result.height - 40f
             for (i in lines.indices.reversed()) {
-                canvas.drawText(lines[i], 30f, y, paint)
-                y -= paint.textSize * 1.4f
+                canvas.drawText(lines[i], 40f, y, paint)
+                y -= paint.textSize * 1.45f
             }
 
-            // 保存到系统相册
+            // 保存到相册
             val savedUri = saveBitmapToGallery(result)
             result.recycle()
             original.recycle()
 
             if (savedUri != null) {
-                Toast.makeText(this, "水印照片已保存到相册", Toast.LENGTH_LONG).show()
+                val msg = if (location != null) "水印照片已保存（含位置）" else "水印照片已保存（无位置信息）"
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show()
             }
@@ -380,15 +437,23 @@ class MainActivity : AppCompatActivity(), android.hardware.SensorEventListener {
 
     private fun getAddressFromLocation(lat: Double, lng: Double): String {
         return try {
-            val geocoder = Geocoder(this, Locale.getDefault())
+            val geocoder = Geocoder(this, Locale.CHINA)
+            @Suppress("DEPRECATION")
             val addresses = geocoder.getFromLocation(lat, lng, 1)
             if (!addresses.isNullOrEmpty()) {
                 val a = addresses[0]
-                listOfNotNull(a.locality, a.subLocality, a.thoroughfare, a.featureName)
-                    .distinct()
-                    .joinToString("")
-                    .ifBlank { a.getAddressLine(0) ?: "" }
-            } else ""
+                buildString {
+                    a.adminArea?.let { append(it) }          // 省
+                    a.locality?.let { append(it) }           // 市
+                    a.subLocality?.let { append(it) }        // 区
+                    a.thoroughfare?.let { append(it) }       // 街道
+                    a.featureName?.let {
+                        if (it != a.thoroughfare) append(it)
+                    }
+                }.ifBlank { a.getAddressLine(0) ?: "" }
+            } else {
+                ""
+            }
         } catch (e: Exception) {
             ""
         }
