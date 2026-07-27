@@ -58,6 +58,31 @@
         android:textSize="16sp"
         android:layout_marginTop="4dp" />
 
+    <!-- 新增两个按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="4dp">
+
+        <Button
+            android:id="@+id/btnAverage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="平均采样"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnSatellite"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="卫星信息"
+            android:textSize="14sp"
+            android:layout_marginStart="6dp" />
+    </LinearLayout>
+
     <!-- 轨迹预览区域 -->
     <TextView
         android:layout_width="match_parent"
