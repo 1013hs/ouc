@@ -92,6 +92,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
 
+    // ===== 平均采样 =====
+    private lateinit var btnAverage: Button
+    private lateinit var btnSatellite: Button
+    private val averageSamples = mutableListOf<Attitude>()
+    private var isAveraging = false
+    private val averageHandler = Handler(Looper.getMainLooper())
+
+    // ===== 卫星信息 =====
+    private var satelliteCount = 0
+    private var satellitesUsed = 0
+    private var gnssCallback: android.location.GnssStatus.Callback? = null
+
     // ===== Activity Result =====
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -137,6 +149,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnTrackToggle = findViewById(R.id.btnTrackToggle)
         btnNavigate = findViewById(R.id.btnNavigate)
         tvNavInfo = findViewById(R.id.tvNavInfo)
+        btnAverage = findViewById(R.id.btnAverage)
+        btnSatellite = findViewById(R.id.btnSatellite)
 
         records.addAll(RecordStorage.load(this))
         adapter = RecordAdapter(records) { record, position -> showEditDialog(record, position) }
@@ -153,6 +167,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnCamera.setOnClickListener { checkPermissionsAndOpenCamera() }
         btnTrackToggle.setOnClickListener { toggleTrackRecording() }
         btnNavigate.setOnClickListener { showNavigateDialog() }
+        btnAverage.setOnClickListener { startAverageSampling() }
+        btnSatellite.setOnClickListener { showSatelliteInfo() }
     }
 
     override fun onResume() {
@@ -166,6 +182,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (isRecordingTrack || isNavigating) {
             startLocationUpdates()
         }
+        registerGnssStatus()
     }
 
     override fun onPause() {
@@ -546,15 +563,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val loc = currentLocation ?: return
         val target = navTarget ?: return
 
-        val dist = distanceBetween(
-            TrackPoint(loc.latitude, loc.longitude),
-            target
-        )
-        val bearing = bearingBetween(
-            TrackPoint(loc.latitude, loc.longitude),
-            target
-        )
-
+        val dist = distanceBetween(TrackPoint(loc.latitude, loc.longitude), target)
+        val bearing = bearingBetween(TrackPoint(loc.latitude, loc.longitude), target)
         val xte = calculateCrossTrackError(loc, target)
 
         tvNavInfo.text = "距离目标: ${"%.1f".format(dist)} m   方位: ${"%.0f".format(bearing)}°   偏离: ${"%.1f".format(xte)} m"
@@ -604,10 +614,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         for (i in 0 until trackPoints.size - 1) {
             val a = trackPoints[i]
             val b = trackPoints[i + 1]
-            val xte = crossTrackDistance(
-                TrackPoint(current.latitude, current.longitude),
-                a, b
-            )
+            val xte = crossTrackDistance(TrackPoint(current.latitude, current.longitude), a, b)
             val d = distanceBetween(TrackPoint(current.latitude, current.longitude), a)
             if (d < minDist) {
                 minDist = d
@@ -617,10 +624,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val toTarget = distanceBetween(TrackPoint(current.latitude, current.longitude), target)
         if (toTarget < minDist) {
             val last = trackPoints.lastOrNull() ?: return 0.0
-            bestXte = crossTrackDistance(
-                TrackPoint(current.latitude, current.longitude),
-                last, target
-            )
+            bestXte = crossTrackDistance(TrackPoint(current.latitude, current.longitude), last, target)
         }
         return bestXte
     }
@@ -630,5 +634,154 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val brng13 = Math.toRadians(bearingBetween(a, p))
         val brng12 = Math.toRadians(bearingBetween(a, b))
         return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
+    }
+
+    // ==================== 多点平均采样 ====================
+    private fun startAverageSampling() {
+        if (isAveraging) {
+            Toast.makeText(this, "正在采样中，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (currentAttitude == null) {
+            Toast.makeText(this, "请先把手机背面贴在岩面上", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        isAveraging = true
+        averageSamples.clear()
+        btnAverage.text = "采样中..."
+        btnAverage.isEnabled = false
+        Toast.makeText(this, "开始平均采样，请保持手机稳定 3 秒", Toast.LENGTH_SHORT).show()
+
+        val sampleRunnable = object : Runnable {
+            var count = 0
+            override fun run() {
+                currentAttitude?.let { averageSamples.add(it) }
+                count++
+                if (count < 15) {
+                    averageHandler.postDelayed(this, 200)
+                } else {
+                    finishAverageSampling()
+                }
+            }
+        }
+        averageHandler.post(sampleRunnable)
+    }
+
+    private fun finishAverageSampling() {
+        isAveraging = false
+        btnAverage.text = "平均采样"
+        btnAverage.isEnabled = true
+
+        if (averageSamples.isEmpty()) {
+            Toast.makeText(this, "采样失败，请重试", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val avgStrike = circularMean(averageSamples.map { it.strike.toDouble() })
+        val avgDip = averageSamples.map { it.dip }.average().toFloat()
+        val avgDipDir = circularMean(averageSamples.map { it.dipDirection.toDouble() })
+
+        val msg = "平均采样结果（${averageSamples.size} 个点）：\n\n" +
+                "走向: ${"%.1f".format(avgStrike)}°\n" +
+                "倾角: ${"%.1f".format(avgDip)}°\n" +
+                "倾向: ${"%.1f".format(avgDipDir)}°"
+
+        AlertDialog.Builder(this)
+            .setTitle("平均采样完成")
+            .setMessage(msg)
+            .setPositiveButton("保存此结果") { _, _ ->
+                val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                val record = Record(
+                    strike = avgStrike.toFloat(),
+                    dip = avgDip,
+                    dipDirection = avgDipDir.toFloat(),
+                    time = time,
+                    note = "平均采样(${averageSamples.size}点)"
+                )
+                records.add(0, record)
+                RecordStorage.save(this, records)
+                adapter.notifyItemInserted(0)
+                recyclerView.scrollToPosition(0)
+                Toast.makeText(this, "已保存平均结果", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun circularMean(angles: List<Double>): Double {
+        if (angles.isEmpty()) return 0.0
+        var sumSin = 0.0
+        var sumCos = 0.0
+        for (a in angles) {
+            val rad = Math.toRadians(a)
+            sumSin += sin(rad)
+            sumCos += cos(rad)
+        }
+        val meanRad = atan2(sumSin / angles.size, sumCos / angles.size)
+        return (Math.toDegrees(meanRad) + 360) % 360
+    }
+
+    // ==================== 卫星信息 ====================
+    private fun showSatelliteInfo() {
+        registerGnssStatus()
+
+        val loc = currentLocation
+        val sb = StringBuilder()
+
+        sb.append("【卫星信息】\n")
+        sb.append("可见卫星数: $satelliteCount\n")
+        sb.append("用于定位卫星数: $satellitesUsed\n\n")
+
+        sb.append("【当前位置】\n")
+        if (loc != null) {
+            sb.append("纬度: ${"%.6f".format(loc.latitude)}\n")
+            sb.append("经度: ${"%.6f".format(loc.longitude)}\n")
+            if (loc.hasAltitude()) {
+                sb.append("海拔: ${"%.1f".format(loc.altitude)} m\n")
+            } else {
+                sb.append("海拔: 无数据\n")
+            }
+            if (loc.hasAccuracy()) {
+                sb.append("精度: ±${"%.1f".format(loc.accuracy)} m\n")
+            }
+            sb.append("时间: ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(loc.time))}")
+        } else {
+            sb.append("暂无位置信息\n请开启GPS并等待定位")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("卫星与位置信息")
+            .setMessage(sb.toString())
+            .setPositiveButton("确定", null)
+            .show()
+    }
+
+    private fun registerGnssStatus() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (gnssCallback == null) {
+                gnssCallback = object : android.location.GnssStatus.Callback() {
+                    override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+                        satelliteCount = status.satelliteCount
+                        var used = 0
+                        for (i in 0 until status.satelliteCount) {
+                            if (status.usedInFix(i)) used++
+                        }
+                        satellitesUsed = used
+                    }
+                }
+                try {
+                    locationManager.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper()))
+                } catch (e: Exception) {
+                    // 忽略
+                }
+            }
+        }
     }
 }
