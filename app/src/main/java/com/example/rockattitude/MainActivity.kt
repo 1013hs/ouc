@@ -33,20 +33,19 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import com.google.android.gms.location.*
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
+import kotlin.math.*
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
+    // ===== 传感器相关 =====
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
     private var magnetometer: Sensor? = null
-
     private val gravity = FloatArray(3)
     private val geomagnetic = FloatArray(3)
     private val rotationMatrix = FloatArray(9)
@@ -60,10 +59,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private val records = mutableListOf<Record>()
     private lateinit var adapter: RecordAdapter
-
     private var currentAttitude: Attitude? = null
 
-    // 水印相机相关
+    // ===== 水印相机 =====
     private var photoUri: Uri? = null
     private var photoFile: File? = null
     private var watermarkOptions = WatermarkOptions()
@@ -78,6 +76,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         var noteText: String = ""
     )
 
+    // ===== 轨迹 & 导航 =====
+    private lateinit var trackView: TrackView
+    private lateinit var btnTrackToggle: Button
+    private lateinit var btnNavigate: Button
+    private lateinit var tvNavInfo: TextView
+
+    private val trackPoints = mutableListOf<TrackPoint>()
+    private var isRecordingTrack = false
+    private var currentLocation: Location? = null
+    private var navTarget: TrackPoint? = null
+    private var isNavigating = false
+    private var lastAlertTime = 0L
+
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var locationCallback: LocationCallback? = null
+
+    // ===== Activity Result =====
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -91,11 +106,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        val allGranted = result.values.all { it }
-        if (allGranted) {
+        if (result.values.all { it }) {
             showWatermarkOptionsDialog()
         } else {
-            Toast.makeText(this, "需要相机和位置权限才能使用水印相机", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "需要相机和位置权限", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result.values.all { it }) {
+            startLocationUpdates()
+        } else {
+            Toast.makeText(this, "需要位置权限才能记录轨迹", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -103,12 +127,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // 初始化控件
         tvStrike = findViewById(R.id.tvStrike)
         tvDip = findViewById(R.id.tvDip)
         tvDipDir = findViewById(R.id.tvDipDir)
         btnSave = findViewById(R.id.btnSave)
         btnCamera = findViewById(R.id.btnCamera)
         recyclerView = findViewById(R.id.recyclerView)
+        trackView = findViewById(R.id.trackView)
+        btnTrackToggle = findViewById(R.id.btnTrackToggle)
+        btnNavigate = findViewById(R.id.btnNavigate)
+        tvNavInfo = findViewById(R.id.tvNavInfo)
 
         records.addAll(RecordStorage.load(this))
         adapter = RecordAdapter(records) { record, position -> showEditDialog(record, position) }
@@ -119,8 +148,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
 
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
         btnSave.setOnClickListener { saveCurrent() }
         btnCamera.setOnClickListener { checkPermissionsAndOpenCamera() }
+        btnTrackToggle.setOnClickListener { toggleTrackRecording() }
+        btnNavigate.setOnClickListener { showNavigateDialog() }
     }
 
     override fun onResume() {
@@ -131,21 +164,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         magnetometer?.also {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
+        if (isRecordingTrack || isNavigating) {
+            startLocationUpdates()
+        }
     }
 
     override fun onPause() {
         super.onPause()
         sensorManager.unregisterListener(this)
+        stopLocationUpdates()
     }
 
+    // ===== 传感器回调 =====
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER ->
-                System.arraycopy(event.values, 0, gravity, 0, 3)
-            Sensor.TYPE_MAGNETIC_FIELD ->
-                System.arraycopy(event.values, 0, geomagnetic, 0, 3)
+            Sensor.TYPE_ACCELEROMETER -> System.arraycopy(event.values, 0, gravity, 0, 3)
+            Sensor.TYPE_MAGNETIC_FIELD -> System.arraycopy(event.values, 0, geomagnetic, 0, 3)
         }
-
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
             val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
             currentAttitude = att
@@ -157,18 +192,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    // ===== 产状保存 =====
     private fun saveCurrent() {
         val att = currentAttitude ?: run {
             Toast.makeText(this, "请先把手机背面贴在岩面上", Toast.LENGTH_SHORT).show()
             return
         }
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-        val record = Record(
-            strike = att.strike,
-            dip = att.dip,
-            dipDirection = att.dipDirection,
-            time = time
-        )
+        val record = Record(strike = att.strike, dip = att.dip, dipDirection = att.dipDirection, time = time)
         records.add(0, record)
         RecordStorage.save(this, records)
         adapter.notifyItemInserted(0)
@@ -214,8 +245,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    // ==================== 水印相机部分 ====================
-
+    // ===== 水印相机（保持原有逻辑） =====
     private fun checkPermissionsAndOpenCamera() {
         val permissions = mutableListOf(
             Manifest.permission.CAMERA,
@@ -225,16 +255,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
-
         val needRequest = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
-        if (needRequest.isEmpty()) {
-            showWatermarkOptionsDialog()
-        } else {
-            permissionLauncher.launch(needRequest.toTypedArray())
-        }
+        if (needRequest.isEmpty()) showWatermarkOptionsDialog()
+        else permissionLauncher.launch(needRequest.toTypedArray())
     }
 
     private fun showWatermarkOptionsDialog() {
@@ -247,7 +272,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cbNote = view.findViewById<CheckBox>(R.id.cbNote)
         val etNote = view.findViewById<EditText>(R.id.etNote)
 
-        // 恢复上次选择
         cbLatLng.isChecked = watermarkOptions.latLng
         cbAltitude.isChecked = watermarkOptions.altitude
         cbAddress.isChecked = watermarkOptions.address
@@ -280,11 +304,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
             photoFile = File.createTempFile("ROCK_${timeStamp}_", ".jpg", storageDir)
-            photoUri = FileProvider.getUriForFile(
-                this,
-                "${packageName}.fileprovider",
-                photoFile!!
-            )
+            photoUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", photoFile!!)
             takePictureLauncher.launch(photoUri)
         } catch (e: Exception) {
             Toast.makeText(this, "无法打开相机: ${e.message}", Toast.LENGTH_LONG).show()
@@ -293,67 +313,45 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun processAndSaveWatermarkedPhoto(file: File) {
         Toast.makeText(this, "正在获取位置并添加水印...", Toast.LENGTH_SHORT).show()
-
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED
         ) {
             addWatermarkAndSave(file, null)
             return
         }
-
-        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-
-        // 1. 先尝试获取最近一次位置（最快）
-        fusedLocationClient.lastLocation
-            .addOnSuccessListener { lastLocation ->
-                if (lastLocation != null) {
-                    addWatermarkAndSave(file, lastLocation)
-                } else {
-                    requestFreshLocation(fusedLocationClient, file)
-                }
+        val client = LocationServices.getFusedLocationProviderClient(this)
+        client.lastLocation
+            .addOnSuccessListener { last ->
+                if (last != null) addWatermarkAndSave(file, last)
+                else requestFreshLocation(client, file)
             }
-            .addOnFailureListener {
-                requestFreshLocation(fusedLocationClient, file)
-            }
+            .addOnFailureListener { requestFreshLocation(client, file) }
     }
 
-    private fun requestFreshLocation(
-        fusedLocationClient: com.google.android.gms.location.FusedLocationProviderClient,
-        file: File
-    ) {
-        val cancellationToken = CancellationTokenSource()
-
-        // 10秒超时保护
-        val timeoutHandler = Handler(Looper.getMainLooper())
-        val timeoutRunnable = Runnable {
-            cancellationToken.cancel()
+    private fun requestFreshLocation(client: FusedLocationProviderClient, file: File) {
+        val token = CancellationTokenSource()
+        val handler = Handler(Looper.getMainLooper())
+        val timeout = Runnable {
+            token.cancel()
             addWatermarkAndSave(file, null)
         }
-        timeoutHandler.postDelayed(timeoutRunnable, 10000)
-
-        fusedLocationClient.getCurrentLocation(
-            Priority.PRIORITY_HIGH_ACCURACY,
-            cancellationToken.token
-        ).addOnSuccessListener { location ->
-            timeoutHandler.removeCallbacks(timeoutRunnable)
-            addWatermarkAndSave(file, location)
-        }.addOnFailureListener {
-            timeoutHandler.removeCallbacks(timeoutRunnable)
-            // 最后再试一次 lastLocation
-            fusedLocationClient.lastLocation
-                .addOnSuccessListener { loc -> addWatermarkAndSave(file, loc) }
-                .addOnFailureListener { addWatermarkAndSave(file, null) }
-        }
+        handler.postDelayed(timeout, 10000)
+        client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
+            .addOnSuccessListener { loc ->
+                handler.removeCallbacks(timeout)
+                addWatermarkAndSave(file, loc)
+            }
+            .addOnFailureListener {
+                handler.removeCallbacks(timeout)
+                client.lastLocation
+                    .addOnSuccessListener { addWatermarkAndSave(file, it) }
+                    .addOnFailureListener { addWatermarkAndSave(file, null) }
+            }
     }
 
     private fun addWatermarkAndSave(file: File, location: Location?) {
         try {
-            val original = BitmapFactory.decodeFile(file.absolutePath)
-                ?: run {
-                    Toast.makeText(this, "图片读取失败", Toast.LENGTH_SHORT).show()
-                    return
-                }
-
+            val original = BitmapFactory.decodeFile(file.absolutePath) ?: return
             val result = original.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(result)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -361,75 +359,41 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 textSize = (result.width * 0.032f).coerceAtLeast(28f)
                 setShadowLayer(5f, 2f, 2f, Color.BLACK)
             }
-
             val lines = mutableListOf<String>()
-
-            // 时间
             if (watermarkOptions.time) {
-                val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                lines.add("时间: $timeStr")
+                lines.add("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
             }
-
-            // 位置信息
             if (location != null) {
                 if (watermarkOptions.latLng) {
                     lines.add("经度: ${"%.6f".format(location.longitude)}")
                     lines.add("纬度: ${"%.6f".format(location.latitude)}")
                 }
                 if (watermarkOptions.altitude) {
-                    if (location.hasAltitude()) {
-                        lines.add("海拔: ${"%.1f".format(location.altitude)} m")
-                    } else {
-                        lines.add("海拔: 无数据")
-                    }
+                    lines.add(if (location.hasAltitude()) "海拔: ${"%.1f".format(location.altitude)} m" else "海拔: 无数据")
                 }
                 if (watermarkOptions.address) {
-                    val address = getAddressFromLocation(location.latitude, location.longitude)
-                    if (address.isNotBlank()) {
-                        lines.add("地点: $address")
-                    } else {
-                        lines.add("地点: 地址解析失败")
-                    }
+                    val addr = getAddressFromLocation(location.latitude, location.longitude)
+                    lines.add(if (addr.isNotBlank()) "地点: $addr" else "地点: 地址解析失败")
                 }
-            } else {
-                if (watermarkOptions.latLng || watermarkOptions.altitude || watermarkOptions.address) {
-                    lines.add("位置: 获取失败（请开启GPS后重试）")
-                }
+            } else if (watermarkOptions.latLng || watermarkOptions.altitude || watermarkOptions.address) {
+                lines.add("位置: 获取失败（请开启GPS后重试）")
             }
-
-            // 当前产状
             if (watermarkOptions.attitude && currentAttitude != null) {
-                val att = currentAttitude!!
-                lines.add(
-                    "走向: ${"%.1f".format(att.strike)}°  " +
-                    "倾角: ${"%.1f".format(att.dip)}°  " +
-                    "倾向: ${"%.1f".format(att.dipDirection)}°"
-                )
+                val a = currentAttitude!!
+                lines.add("走向: ${"%.1f".format(a.strike)}°  倾角: ${"%.1f".format(a.dip)}°  倾向: ${"%.1f".format(a.dipDirection)}°")
             }
-
-            // 备注
             if (watermarkOptions.note && watermarkOptions.noteText.isNotBlank()) {
                 lines.add("备注: ${watermarkOptions.noteText}")
             }
-
-            // 从底部往上绘制
             var y = result.height - 40f
             for (i in lines.indices.reversed()) {
                 canvas.drawText(lines[i], 40f, y, paint)
                 y -= paint.textSize * 1.45f
             }
-
-            // 保存到相册
-            val savedUri = saveBitmapToGallery(result)
+            val uri = saveBitmapToGallery(result)
             result.recycle()
             original.recycle()
-
-            if (savedUri != null) {
-                val msg = if (location != null) "水印照片已保存（含位置）" else "水印照片已保存（无位置信息）"
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show()
-            }
+            Toast.makeText(this, if (uri != null) "水印照片已保存" else "保存失败", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "处理失败: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -439,49 +403,244 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
             @Suppress("DEPRECATION")
-            val addresses = geocoder.getFromLocation(lat, lng, 1)
-            if (!addresses.isNullOrEmpty()) {
-                val a = addresses[0]
+            val list = geocoder.getFromLocation(lat, lng, 1)
+            if (!list.isNullOrEmpty()) {
+                val a = list[0]
                 buildString {
-                    a.adminArea?.let { append(it) }          // 省
-                    a.locality?.let { append(it) }           // 市
-                    a.subLocality?.let { append(it) }        // 区
-                    a.thoroughfare?.let { append(it) }       // 街道
-                    a.featureName?.let {
-                        if (it != a.thoroughfare) append(it)
-                    }
+                    a.adminArea?.let { append(it) }
+                    a.locality?.let { append(it) }
+                    a.subLocality?.let { append(it) }
+                    a.thoroughfare?.let { append(it) }
                 }.ifBlank { a.getAddressLine(0) ?: "" }
-            } else {
-                ""
-            }
-        } catch (e: Exception) {
-            ""
-        }
+            } else ""
+        } catch (e: Exception) { "" }
     }
 
     private fun saveBitmapToGallery(bitmap: Bitmap): Uri? {
-        val filename = "RockAttitude_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.jpg"
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+        val name = "RockAttitude_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.jpg"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/RockAttitude")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
-
-        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            ?: return null
-
-        contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
-        }
-
+        val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        contentResolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            contentValues.clear()
-            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            contentResolver.update(uri, contentValues, null, null)
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
         }
         return uri
+    }
+
+    // ===== 轨迹记录 & 导航 =====
+    private fun toggleTrackRecording() {
+        if (isRecordingTrack) {
+            isRecordingTrack = false
+            btnTrackToggle.text = "开始记录轨迹"
+            stopLocationUpdates()
+            Toast.makeText(this, "已停止记录轨迹", Toast.LENGTH_SHORT).show()
+        } else {
+            checkLocationPermissionAndStart()
+        }
+    }
+
+    private fun checkLocationPermissionAndStart() {
+        val perms = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (perms.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
+            isRecordingTrack = true
+            btnTrackToggle.text = "停止记录轨迹"
+            startLocationUpdates()
+            Toast.makeText(this, "开始记录轨迹", Toast.LENGTH_SHORT).show()
+        } else {
+            locationPermissionLauncher.launch(perms)
+        }
+    }
+
+    private fun startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000)
+            .setMinUpdateIntervalMillis(1000)
+            .build()
+
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                currentLocation = loc
+                val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
+
+                if (isRecordingTrack) {
+                    // 过滤太近的点（小于3米不记）
+                    val last = trackPoints.lastOrNull()
+                    if (last == null || distanceBetween(last, point) > 3.0) {
+                        trackPoints.add(point)
+                    }
+                }
+
+                // 更新预览
+                trackView.updateTrack(
+                    trackPoints,
+                    currentLocation?.let { TrackPoint(it.latitude, it.longitude, it.altitude) },
+                    navTarget
+                )
+
+                // 导航模式下计算偏离
+                if (isNavigating && navTarget != null && currentLocation != null) {
+                    updateNavigationInfo()
+                }
+            }
+        }
+        fusedLocationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
+    }
+
+    private fun stopLocationUpdates() {
+        locationCallback?.let {
+            fusedLocationClient.removeLocationUpdates(it)
+            locationCallback = null
+        }
+    }
+
+    private fun showNavigateDialog() {
+        if (trackPoints.isEmpty()) {
+            Toast.makeText(this, "请先记录轨迹再进行导航", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isNavigating) {
+            // 停止导航
+            isNavigating = false
+            navTarget = null
+            tvNavInfo.text = ""
+            btnNavigate.text = "导航"
+            trackView.updateTrack(trackPoints, currentLocation?.let { TrackPoint(it.latitude, it.longitude) }, null)
+            Toast.makeText(this, "已停止导航", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 选择目标点
+        val items = trackPoints.mapIndexed { index, p ->
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(p.time))
+            "点${index + 1}  \( time  ( \){"%.5f".format(p.latitude)}, ${"%.5f".format(p.longitude)})"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("选择导航目标点")
+            .setItems(items) { _, which ->
+                navTarget = trackPoints[which]
+                isNavigating = true
+                btnNavigate.text = "停止导航"
+                if (!isRecordingTrack) startLocationUpdates()
+                updateNavigationInfo()
+                Toast.makeText(this, "开始导航到选中点", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun updateNavigationInfo() {
+        val loc = currentLocation ?: return
+        val target = navTarget ?: return
+
+        val dist = distanceBetween(
+            TrackPoint(loc.latitude, loc.longitude),
+            target
+        )
+        val bearing = bearingBetween(
+            TrackPoint(loc.latitude, loc.longitude),
+            target
+        )
+
+        // 计算横向偏离（Cross Track Error）
+        // 简化：以当前位置到目标的直线为参考，用最近轨迹点计算
+        val xte = calculateCrossTrackError(loc, target)
+
+        tvNavInfo.text = "距离目标: ${"%.1f".format(dist)} m   方位: ${"%.0f".format(bearing)}°   偏离: ${"%.1f".format(xte)} m"
+
+        // 偏离超过10米弹窗报警（30秒内只弹一次）
+        if (abs(xte) > 10.0) {
+            val now = System.currentTimeMillis()
+            if (now - lastAlertTime > 30000) {
+                lastAlertTime = now
+                AlertDialog.Builder(this)
+                    .setTitle("⚠ 航向偏离报警")
+                    .setMessage("当前偏离航线 ${"%.1f".format(abs(xte))} 米，请注意调整方向！")
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
+        }
+
+        trackView.updateTrack(
+            trackPoints,
+            TrackPoint(loc.latitude, loc.longitude, loc.altitude),
+            target
+        )
+    }
+
+    // 计算两点距离（米）
+    private fun distanceBetween(p1: TrackPoint, p2: TrackPoint): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(p2.latitude - p1.latitude)
+        val dLng = Math.toRadians(p2.longitude - p1.longitude)
+        val a = sin(dLat / 2).pow(2) +
+                cos(Math.toRadians(p1.latitude)) * cos(Math.toRadians(p2.latitude)) *
+                sin(dLng / 2).pow(2)
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    // 计算方位角
+    private fun bearingBetween(p1: TrackPoint, p2: TrackPoint): Double {
+        val lat1 = Math.toRadians(p1.latitude)
+        val lat2 = Math.toRadians(p2.latitude)
+        val dLng = Math.toRadians(p2.longitude - p1.longitude)
+        val y = sin(dLng) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLng)
+        return (Math.toDegrees(atan2(y, x)) + 360) % 360
+    }
+
+    // 简化横向偏离计算（当前位置到「最近轨迹段」的垂直距离）
+    private fun calculateCrossTrackError(current: Location, target: TrackPoint): Double {
+        if (trackPoints.size < 2) return 0.0
+        // 找最近的轨迹段
+        var minDist = Double.MAX_VALUE
+        var bestXte = 0.0
+        for (i in 0 until trackPoints.size - 1) {
+            val a = trackPoints[i]
+            val b = trackPoints[i + 1]
+            val xte = crossTrackDistance(
+                TrackPoint(current.latitude, current.longitude),
+                a, b
+            )
+            val d = distanceBetween(TrackPoint(current.latitude, current.longitude), a)
+            if (d < minDist) {
+                minDist = d
+                bestXte = xte
+            }
+        }
+        // 如果离目标更近，也考虑目标段
+        val toTarget = distanceBetween(TrackPoint(current.latitude, current.longitude), target)
+        if (toTarget < minDist) {
+            val last = trackPoints.lastOrNull() ?: return 0.0
+            bestXte = crossTrackDistance(
+                TrackPoint(current.latitude, current.longitude),
+                last, target
+            )
+        }
+        return bestXte
+    }
+
+    // Cross-track distance (米)
+    private fun crossTrackDistance(p: TrackPoint, a: TrackPoint, b: TrackPoint): Double {
+        val d13 = distanceBetween(a, p) / 6371000.0   // 弧度
+        val brng13 = Math.toRadians(bearingBetween(a, p))
+        val brng12 = Math.toRadians(bearingBetween(a, b))
+        return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
     }
 }
