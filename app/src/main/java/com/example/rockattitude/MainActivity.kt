@@ -245,7 +245,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    // ===== 水印相机（保持原有逻辑） =====
+    // ===== 水印相机 =====
     private fun checkPermissionsAndOpenCamera() {
         val permissions = mutableListOf(
             Manifest.permission.CAMERA,
@@ -479,21 +479,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
 
                 if (isRecordingTrack) {
-                    // 过滤太近的点（小于3米不记）
                     val last = trackPoints.lastOrNull()
                     if (last == null || distanceBetween(last, point) > 3.0) {
                         trackPoints.add(point)
                     }
                 }
 
-                // 更新预览
                 trackView.updateTrack(
                     trackPoints,
                     currentLocation?.let { TrackPoint(it.latitude, it.longitude, it.altitude) },
                     navTarget
                 )
 
-                // 导航模式下计算偏离
                 if (isNavigating && navTarget != null && currentLocation != null) {
                     updateNavigationInfo()
                 }
@@ -515,21 +512,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
         if (isNavigating) {
-            // 停止导航
             isNavigating = false
             navTarget = null
             tvNavInfo.text = ""
             btnNavigate.text = "导航"
-            trackView.updateTrack(trackPoints, currentLocation?.let { TrackPoint(it.latitude, it.longitude) }, null)
+            trackView.updateTrack(
+                trackPoints,
+                currentLocation?.let { TrackPoint(it.latitude, it.longitude) },
+                null
+            )
             Toast.makeText(this, "已停止导航", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // 选择目标点
-        val items = trackPoints.mapIndexed { index, p ->
+        val items = Array(trackPoints.size) { index ->
+            val p = trackPoints[index]
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(p.time))
             "点${index + 1}  \( time  ( \){"%.5f".format(p.latitude)}, ${"%.5f".format(p.longitude)})"
-        }.toTypedArray()
+        }
 
         AlertDialog.Builder(this)
             .setTitle("选择导航目标点")
@@ -537,7 +537,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 navTarget = trackPoints[which]
                 isNavigating = true
                 btnNavigate.text = "停止导航"
-                if (!isRecordingTrack) startLocationUpdates()
+                if (!isRecordingTrack) {
+                    startLocationUpdates()
+                }
                 updateNavigationInfo()
                 Toast.makeText(this, "开始导航到选中点", Toast.LENGTH_SHORT).show()
             }
@@ -558,13 +560,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             target
         )
 
-        // 计算横向偏离（Cross Track Error）
-        // 简化：以当前位置到目标的直线为参考，用最近轨迹点计算
         val xte = calculateCrossTrackError(loc, target)
 
         tvNavInfo.text = "距离目标: ${"%.1f".format(dist)} m   方位: ${"%.0f".format(bearing)}°   偏离: ${"%.1f".format(xte)} m"
 
-        // 偏离超过10米弹窗报警（30秒内只弹一次）
         if (abs(xte) > 10.0) {
             val now = System.currentTimeMillis()
             if (now - lastAlertTime > 30000) {
@@ -584,7 +583,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         )
     }
 
-    // 计算两点距离（米）
     private fun distanceBetween(p1: TrackPoint, p2: TrackPoint): Double {
         val R = 6371000.0
         val dLat = Math.toRadians(p2.latitude - p1.latitude)
@@ -595,7 +593,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return R * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    // 计算方位角
     private fun bearingBetween(p1: TrackPoint, p2: TrackPoint): Double {
         val lat1 = Math.toRadians(p1.latitude)
         val lat2 = Math.toRadians(p2.latitude)
@@ -605,10 +602,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return (Math.toDegrees(atan2(y, x)) + 360) % 360
     }
 
-    // 简化横向偏离计算（当前位置到「最近轨迹段」的垂直距离）
     private fun calculateCrossTrackError(current: Location, target: TrackPoint): Double {
         if (trackPoints.size < 2) return 0.0
-        // 找最近的轨迹段
         var minDist = Double.MAX_VALUE
         var bestXte = 0.0
         for (i in 0 until trackPoints.size - 1) {
@@ -624,7 +619,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 bestXte = xte
             }
         }
-        // 如果离目标更近，也考虑目标段
         val toTarget = distanceBetween(TrackPoint(current.latitude, current.longitude), target)
         if (toTarget < minDist) {
             val last = trackPoints.lastOrNull() ?: return 0.0
@@ -636,9 +630,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return bestXte
     }
 
-    // Cross-track distance (米)
     private fun crossTrackDistance(p: TrackPoint, a: TrackPoint, b: TrackPoint): Double {
-        val d13 = distanceBetween(a, p) / 6371000.0   // 弧度
+        val d13 = distanceBetween(a, p) / 6371000.0
         val brng13 = Math.toRadians(bearingBetween(a, p))
         val brng12 = Math.toRadians(bearingBetween(a, b))
         return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
