@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var satelliteCount = 0
     private var satellitesUsed = 0
     private var gnssCallback: android.location.GnssStatus.Callback? = null
+    private val satList = mutableListOf<SatInfo>()
 
     private lateinit var btnExportKml: Button
     private lateinit var btnExportCsv: Button
@@ -128,6 +129,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     ) { result ->
         if (result.values.all { it }) {
             startLocationUpdates()
+            registerGnssStatus()
         } else {
             Toast.makeText(this, "需要位置权限才能记录轨迹", Toast.LENGTH_LONG).show()
         }
@@ -173,6 +175,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnExportKml.setOnClickListener { exportKml() }
         btnExportCsv.setOnClickListener { exportCsv() }
         btnHistory.setOnClickListener { showHistoryDialog() }
+
+        // 软件打开后默认开启 GPS
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startLocationUpdates()
+            registerGnssStatus()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
     }
 
     override fun onResume() {
@@ -732,37 +749,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showSatelliteInfo() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startLocationUpdates()
+        }
         registerGnssStatus()
 
-        val loc = currentLocation
-        val sb = StringBuilder()
+        Handler(Looper.getMainLooper()).postDelayed({
+            val view = layoutInflater.inflate(R.layout.dialog_satellite, null)
+            val tvSatCount = view.findViewById<TextView>(R.id.tvSatCount)
+            val skyplot = view.findViewById<SkyplotView>(R.id.skyplotView)
 
-        sb.append("【卫星信息】\n")
-        sb.append("可见卫星数: ").append(satelliteCount).append("\n")
-        sb.append("用于定位卫星数: ").append(satellitesUsed).append("\n\n")
+            tvSatCount.text = "当前参与定位卫星数量: " + satellitesUsed + " 颗"
+            skyplot.setSatellites(satList.toList())
 
-        sb.append("【当前位置】\n")
-        if (loc != null) {
-            sb.append("纬度: ").append("%.6f".format(loc.latitude)).append("\n")
-            sb.append("经度: ").append("%.6f".format(loc.longitude)).append("\n")
-            if (loc.hasAltitude()) {
-                sb.append("海拔: ").append("%.1f".format(loc.altitude)).append(" m\n")
-            } else {
-                sb.append("海拔: 无数据\n")
-            }
-            if (loc.hasAccuracy()) {
-                sb.append("精度: ±").append("%.1f".format(loc.accuracy)).append(" m\n")
-            }
-            sb.append("时间: ").append(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(loc.time)))
-        } else {
-            sb.append("暂无位置信息\n请开启GPS并等待定位")
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("卫星与位置信息")
-            .setMessage(sb.toString())
-            .setPositiveButton("确定", null)
-            .show()
+            AlertDialog.Builder(this)
+                .setView(view)
+                .setPositiveButton("确定", null)
+                .show()
+        }, 600)
     }
 
     private fun registerGnssStatus() {
@@ -773,22 +779,33 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            if (gnssCallback == null) {
-                gnssCallback = object : android.location.GnssStatus.Callback() {
-                    override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
-                        satelliteCount = status.satelliteCount
-                        var used = 0
-                        for (i in 0 until status.satelliteCount) {
-                            if (status.usedInFix(i)) used++
-                        }
-                        satellitesUsed = used
-                    }
-                }
+            gnssCallback?.let {
                 try {
-                    locationManager.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper()))
-                } catch (e: Exception) {
-                    // 忽略
+                    locationManager.unregisterGnssStatusCallback(it)
+                } catch (e: Exception) {}
+            }
+
+            gnssCallback = object : android.location.GnssStatus.Callback() {
+                override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+                    satelliteCount = status.satelliteCount
+                    var used = 0
+                    satList.clear()
+                    for (i in 0 until status.satelliteCount) {
+                        val usedInFix = status.usedInFix(i)
+                        if (usedInFix) used++
+                        val az = status.getAzimuthDegrees(i)
+                        val el = status.getElevationDegrees(i)
+                        if (el >= 0) {
+                            satList.add(SatInfo(az, el, usedInFix))
+                        }
+                    }
+                    satellitesUsed = used
                 }
+            }
+            try {
+                locationManager.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper()))
+            } catch (e: Exception) {
+                // 忽略
             }
         }
     }
