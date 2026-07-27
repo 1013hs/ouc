@@ -3,22 +3,22 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="12dp">
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="把手机背面贴在岩面上"
-        android:textSize="16sp"
+        android:textSize="15sp"
         android:gravity="center"
-        android:paddingBottom="12dp" />
+        android:paddingBottom="6dp" />
 
     <TextView
         android:id="@+id/tvStrike"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="走向: --°"
-        android:textSize="22sp"
+        android:textSize="20sp"
         android:textStyle="bold"
         android:gravity="center" />
 
@@ -27,44 +27,92 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="倾角: --°"
-        android:textSize="22sp"
+        android:textSize="20sp"
         android:textStyle="bold"
         android:gravity="center"
-        android:paddingTop="8dp" />
+        android:paddingTop="4dp" />
 
     <TextView
         android:id="@+id/tvDipDir"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="倾向: --°"
-        android:textSize="22sp"
+        android:textSize="20sp"
         android:textStyle="bold"
         android:gravity="center"
-        android:paddingTop="8dp"
-        android:paddingBottom="16dp" />
+        android:paddingTop="4dp"
+        android:paddingBottom="8dp" />
 
     <Button
         android:id="@+id/btnSave"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="保存当前产状"
-        android:textSize="18sp" />
+        android:textSize="16sp" />
 
     <Button
         android:id="@+id/btnCamera"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="水印相机"
-        android:textSize="18sp"
-        android:layout_marginTop="8dp" />
+        android:textSize="16sp"
+        android:layout_marginTop="4dp" />
+
+    <!-- 轨迹预览区域 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="实时轨迹预览"
+        android:textSize="14sp"
+        android:paddingTop="10dp"
+        android:paddingBottom="4dp" />
+
+    <com.example.rockattitude.TrackView
+        android:id="@+id/trackView"
+        android:layout_width="match_parent"
+        android:layout_height="180dp"
+        android:background="#F0F0F0" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
+
+        <Button
+            android:id="@+id/btnTrackToggle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="开始记录轨迹"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnNavigate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="导航"
+            android:textSize="14sp"
+            android:layout_marginStart="6dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvNavInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="13sp"
+        android:paddingTop="4dp"
+        android:textColor="#D32F2F" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="保存记录"
-        android:textSize="16sp"
-        android:paddingTop="20dp"
-        android:paddingBottom="8dp" />
+        android:textSize="14sp"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerView"
