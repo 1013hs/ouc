@@ -499,14 +499,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         fusedLocationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
     }
 
-    private fun stopLocationUpdates() {
-        locationCallback?.let {
-            fusedLocationClient.removeLocationUpdates(it)
-            locationCallback = null
-        }
-    }
-
-    private fun showNavigateDialog() {
+private fun showNavigateDialog() {
         if (trackPoints.isEmpty()) {
             Toast.makeText(this, "请先记录轨迹再进行导航", Toast.LENGTH_SHORT).show()
             return
@@ -528,7 +521,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val items = Array(trackPoints.size) { index ->
             val p = trackPoints[index]
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(p.time))
-            "点${index + 1}  \( time  ( \){"%.5f".format(p.latitude)}, ${"%.5f".format(p.longitude)})"
+            "点" + (index + 1) + "  " + time + "  lat=" + "%.5f".format(p.latitude) + "  lng=" + "%.5f".format(p.longitude)
         }
 
         AlertDialog.Builder(this)
@@ -545,95 +538,4 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    private fun updateNavigationInfo() {
-        val loc = currentLocation ?: return
-        val target = navTarget ?: return
-
-        val dist = distanceBetween(
-            TrackPoint(loc.latitude, loc.longitude),
-            target
-        )
-        val bearing = bearingBetween(
-            TrackPoint(loc.latitude, loc.longitude),
-            target
-        )
-
-        val xte = calculateCrossTrackError(loc, target)
-
-        tvNavInfo.text = "距离目标: ${"%.1f".format(dist)} m   方位: ${"%.0f".format(bearing)}°   偏离: ${"%.1f".format(xte)} m"
-
-        if (abs(xte) > 10.0) {
-            val now = System.currentTimeMillis()
-            if (now - lastAlertTime > 30000) {
-                lastAlertTime = now
-                AlertDialog.Builder(this)
-                    .setTitle("⚠ 航向偏离报警")
-                    .setMessage("当前偏离航线 ${"%.1f".format(abs(xte))} 米，请注意调整方向！")
-                    .setPositiveButton("知道了", null)
-                    .show()
-            }
-        }
-
-        trackView.updateTrack(
-            trackPoints,
-            TrackPoint(loc.latitude, loc.longitude, loc.altitude),
-            target
-        )
-    }
-
-    private fun distanceBetween(p1: TrackPoint, p2: TrackPoint): Double {
-        val R = 6371000.0
-        val dLat = Math.toRadians(p2.latitude - p1.latitude)
-        val dLng = Math.toRadians(p2.longitude - p1.longitude)
-        val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(p1.latitude)) * cos(Math.toRadians(p2.latitude)) *
-                sin(dLng / 2).pow(2)
-        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
-    }
-
-    private fun bearingBetween(p1: TrackPoint, p2: TrackPoint): Double {
-        val lat1 = Math.toRadians(p1.latitude)
-        val lat2 = Math.toRadians(p2.latitude)
-        val dLng = Math.toRadians(p2.longitude - p1.longitude)
-        val y = sin(dLng) * cos(lat2)
-        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLng)
-        return (Math.toDegrees(atan2(y, x)) + 360) % 360
-    }
-
-    private fun calculateCrossTrackError(current: Location, target: TrackPoint): Double {
-        if (trackPoints.size < 2) return 0.0
-        var minDist = Double.MAX_VALUE
-        var bestXte = 0.0
-        for (i in 0 until trackPoints.size - 1) {
-            val a = trackPoints[i]
-            val b = trackPoints[i + 1]
-            val xte = crossTrackDistance(
-                TrackPoint(current.latitude, current.longitude),
-                a, b
-            )
-            val d = distanceBetween(TrackPoint(current.latitude, current.longitude), a)
-            if (d < minDist) {
-                minDist = d
-                bestXte = xte
-            }
-        }
-        val toTarget = distanceBetween(TrackPoint(current.latitude, current.longitude), target)
-        if (toTarget < minDist) {
-            val last = trackPoints.lastOrNull() ?: return 0.0
-            bestXte = crossTrackDistance(
-                TrackPoint(current.latitude, current.longitude),
-                last, target
-            )
-        }
-        return bestXte
-    }
-
-    private fun crossTrackDistance(p: TrackPoint, a: TrackPoint, b: TrackPoint): Double {
-        val d13 = distanceBetween(a, p) / 6371000.0
-        val brng13 = Math.toRadians(bearingBetween(a, p))
-        val brng12 = Math.toRadians(bearingBetween(a, b))
-        return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
-    }
 }
