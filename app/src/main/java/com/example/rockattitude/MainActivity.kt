@@ -104,6 +104,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var satellitesUsed = 0
     private var gnssCallback: android.location.GnssStatus.Callback? = null
 
+    // ===== 导出 & 历史 =====
+    private lateinit var btnExportKml: Button
+    private lateinit var btnExportCsv: Button
+    private lateinit var btnHistory: Button
+
     // ===== Activity Result =====
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -151,6 +156,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvNavInfo = findViewById(R.id.tvNavInfo)
         btnAverage = findViewById(R.id.btnAverage)
         btnSatellite = findViewById(R.id.btnSatellite)
+        btnExportKml = findViewById(R.id.btnExportKml)
+        btnExportCsv = findViewById(R.id.btnExportCsv)
+        btnHistory = findViewById(R.id.btnHistory)
 
         records.addAll(RecordStorage.load(this))
         adapter = RecordAdapter(records) { record, position -> showEditDialog(record, position) }
@@ -169,6 +177,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnNavigate.setOnClickListener { showNavigateDialog() }
         btnAverage.setOnClickListener { startAverageSampling() }
         btnSatellite.setOnClickListener { showSatelliteInfo() }
+        btnExportKml.setOnClickListener { exportKml() }
+        btnExportCsv.setOnClickListener { exportCsv() }
+        btnHistory.setOnClickListener { showHistoryDialog() }
     }
 
     override fun onResume() {
@@ -783,5 +794,139 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
             }
         }
+    }
+
+    // ==================== 导出 KML ====================
+    private fun exportKml() {
+        if (trackPoints.isEmpty() && records.isEmpty()) {
+            Toast.makeText(this, "没有可导出的数据", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val sb = StringBuilder()
+            sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            sb.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n")
+            sb.append("<Document>\n")
+            sb.append("  <name>岩层产状测量轨迹</name>\n")
+            sb.append("  <description>由岩层产状测量APP导出</description>\n")
+
+            if (trackPoints.size >= 2) {
+                sb.append("  <Placemark>\n")
+                sb.append("    <name>测量轨迹</name>\n")
+                sb.append("    <LineString>\n")
+                sb.append("      <coordinates>\n")
+                for (p in trackPoints) {
+                    sb.append("        \( {p.longitude}, \){p.latitude},${p.altitude}\n")
+                }
+                sb.append("      </coordinates>\n")
+                sb.append("    </LineString>\n")
+                sb.append("  </Placemark>\n")
+            }
+
+            trackPoints.forEachIndexed { index, p ->
+                sb.append("  <Placemark>\n")
+                sb.append("    <name>轨迹点${index + 1}</name>\n")
+                sb.append("    <Point>\n")
+                sb.append("      <coordinates>\( {p.longitude}, \){p.latitude},${p.altitude}</coordinates>\n")
+                sb.append("    </Point>\n")
+                sb.append("  </Placemark>\n")
+            }
+
+            sb.append("</Document>\n")
+            sb.append("</kml>\n")
+
+            val fileName = "RockAttitude_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.kml"
+            val file = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
+            file.parentFile?.mkdirs()
+            file.writeText(sb.toString())
+
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "application/vnd.google-earth.kml+xml"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(shareIntent, "导出KML文件"))
+            Toast.makeText(this, "KML已生成", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ==================== 导出 CSV ====================
+    private fun exportCsv() {
+        if (records.isEmpty()) {
+            Toast.makeText(this, "没有产状记录可导出", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val sb = StringBuilder()
+            sb.append("时间,走向(°),倾角(°),倾向(°),备注\n")
+            for (r in records) {
+                sb.append("\"\( {r.time}\", \){r.strike},\( {r.dip}, \){r.dipDirection},\"${r.note}\"\n")
+            }
+
+            val fileName = "RockAttitude_产状_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.csv"
+            val file = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
+            file.parentFile?.mkdirs()
+            file.writeText(sb.toString(), Charsets.UTF_8)
+
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(shareIntent, "导出产状CSV"))
+            Toast.makeText(this, "CSV已生成", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // ==================== 历史测量（按天） ====================
+    private fun showHistoryDialog() {
+        if (records.isEmpty()) {
+            Toast.makeText(this, "暂无历史记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val grouped = records.groupBy { it.time.substring(0, 10) }
+            .toSortedMap(reverseOrder())
+
+        val dayList = grouped.keys.toList()
+        val dayItems = dayList.map { day ->
+            val count = grouped[day]?.size ?: 0
+            "$day  （$count 条记录）"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("历史测量记录（按天）")
+            .setItems(dayItems) { _, which ->
+                val selectedDay = dayList[which]
+                val dayRecords = grouped[selectedDay] ?: emptyList()
+                showDayDetail(selectedDay, dayRecords)
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    private fun showDayDetail(day: String, dayRecords: List<Record>) {
+        val sb = StringBuilder()
+        sb.append("$day 共 ${dayRecords.size} 条记录\n\n")
+        dayRecords.forEachIndexed { index, r ->
+            sb.append("${index + 1}. ${r.time.substring(11)}\n")
+            sb.append("   走向: ${"%.1f".format(r.strike)}°  倾角: ${"%.1f".format(r.dip)}°  倾向: ${"%.1f".format(r.dipDirection)}°\n")
+            if (r.note.isNotBlank()) sb.append("   备注: ${r.note}\n")
+            sb.append("\n")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("$day 详细数据")
+            .setMessage(sb.toString())
+            .setPositiveButton("确定", null)
+            .show()
     }
 }
