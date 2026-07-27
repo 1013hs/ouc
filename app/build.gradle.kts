@@ -44,4 +44,9 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.google.code.gson:gson:2.10.1")
+
+    // 水印相机新增依赖
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("com.google.android.gms:play-services-location:21.1.0")
 }
