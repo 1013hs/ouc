@@ -106,7 +106,15 @@
             android:text="导出CSV"
             android:textSize="13sp"
             android:layout_marginStart="4dp" />
-
+        
+        <Button
+            android:id="@+id/btnHistoryTrack"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="历史轨迹"
+            android:textSize="14sp"
+            android:layout_marginTop="4dp" />
+        
         <Button
             android:id="@+id/btnHistory"
             android:layout_width="0dp"
