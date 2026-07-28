@@ -103,6 +103,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var btnExportKml: Button
     private lateinit var btnExportCsv: Button
     private lateinit var btnHistory: Button
+    private lateinit var btnHistoryTrack: Button
+
+    private val historyTracks = mutableMapOf<String, MutableList<TrackPoint>>()
 
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -154,11 +157,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnExportKml = findViewById(R.id.btnExportKml)
         btnExportCsv = findViewById(R.id.btnExportCsv)
         btnHistory = findViewById(R.id.btnHistory)
+        btnHistoryTrack = findViewById(R.id.btnHistoryTrack)
 
         records.addAll(RecordStorage.load(this))
         adapter = RecordAdapter(records) { record, position -> showEditDialog(record, position) }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
+
+        loadHistoryTracks()
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -175,6 +181,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnExportKml.setOnClickListener { exportKml() }
         btnExportCsv.setOnClickListener { exportCsv() }
         btnHistory.setOnClickListener { showHistoryDialog() }
+        btnHistoryTrack.setOnClickListener { showHistoryTrackDialog() }
 
         // 软件打开后默认开启 GPS
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -480,6 +487,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (isRecordingTrack) {
             isRecordingTrack = false
             btnTrackToggle.text = "开始记录轨迹"
+            saveCurrentTrackToHistory()
             stopLocationUpdates()
             Toast.makeText(this, "已停止记录轨迹", Toast.LENGTH_SHORT).show()
         } else {
@@ -507,8 +515,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000)
-            .setMinUpdateIntervalMillis(1000)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+            .setMinUpdateIntervalMillis(500)
+            .setWaitForAccurateLocation(true)
             .build()
 
         locationCallback = object : LocationCallback() {
@@ -519,7 +528,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
                 if (isRecordingTrack) {
                     val last = trackPoints.lastOrNull()
-                    if (last == null || distanceBetween(last, point) > 3.0) {
+                    if (last == null || distanceBetween(last, point) > 2.0) {
                         trackPoints.add(point)
                     }
                 }
@@ -811,48 +820,61 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun exportKml() {
-        if (trackPoints.isEmpty() && records.isEmpty()) {
-            Toast.makeText(this, "没有可导出的数据", Toast.LENGTH_SHORT).show()
+        if (trackPoints.size < 2) {
+            Toast.makeText(this, "当前轨迹点数不足，请先记录轨迹或选择历史轨迹", Toast.LENGTH_SHORT).show()
             return
         }
+        exportKmlWithTrack(trackPoints, "当前轨迹")
+    }
 
+    private fun exportKmlWithTrack(points: List<TrackPoint>, name: String) {
         try {
             val sb = StringBuilder()
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
             sb.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n")
             sb.append("<Document>\n")
-            sb.append("  <name>岩层产状测量轨迹</name>\n")
-            sb.append("  <description>由岩层产状测量APP导出</description>\n")
+            sb.append("  <name>").append(name).append("</name>\n")
+            sb.append("  <description>岩层产状测量APP导出</description>\n")
 
-            if (trackPoints.size >= 2) {
-                sb.append("  <Placemark>\n")
-                sb.append("    <name>测量轨迹</name>\n")
-                sb.append("    <LineString>\n")
-                sb.append("      <coordinates>\n")
-                for (p in trackPoints) {
-                    sb.append("        ").append(p.longitude).append(",").append(p.latitude).append(",").append(p.altitude).append("\n")
-                }
-                sb.append("      </coordinates>\n")
-                sb.append("    </LineString>\n")
-                sb.append("  </Placemark>\n")
+            sb.append("  <Placemark>\n")
+            sb.append("    <name>轨迹线</name>\n")
+            sb.append("    <Style><LineStyle><color>ff0000ff</color><width>4</width></LineStyle></Style>\n")
+            sb.append("    <LineString>\n")
+            sb.append("      <tessellate>1</tessellate>\n")
+            sb.append("      <coordinates>\n")
+            for (p in points) {
+                sb.append(p.longitude).append(",").append(p.latitude).append(",").append(p.altitude).append(" ")
             }
+            sb.append("\n      </coordinates>\n")
+            sb.append("    </LineString>\n")
+            sb.append("  </Placemark>\n")
 
-            trackPoints.forEachIndexed { index, p ->
-                sb.append("  <Placemark>\n")
-                sb.append("    <name>轨迹点").append(index + 1).append("</name>\n")
-                sb.append("    <Point>\n")
-                sb.append("      <coordinates>").append(p.longitude).append(",").append(p.latitude).append(",").append(p.altitude).append("</coordinates>\n")
-                sb.append("    </Point>\n")
-                sb.append("  </Placemark>\n")
+            if (points.isNotEmpty()) {
+                val start = points.first()
+                val end = points.last()
+                sb.append("  <Placemark><name>起点</name><Point><coordinates>")
+                sb.append(start.longitude).append(",").append(start.latitude).append(",").append(start.altitude)
+                sb.append("</coordinates></Point></Placemark>\n")
+
+                sb.append("  <Placemark><name>终点</name><Point><coordinates>")
+                sb.append(end.longitude).append(",").append(end.latitude).append(",").append(end.altitude)
+                sb.append("</coordinates></Point></Placemark>\n")
             }
 
             sb.append("</Document>\n")
-            sb.append("</kml>\n")
+            sb.append("</kml>")
 
-            val fileName = "RockAttitude_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".kml"
-            val file = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
-            file.parentFile?.mkdirs()
-            file.writeText(sb.toString())
+            val fileName = "Track_" + name.replace(" ", "_") + "_" +
+                    SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".kml"
+            val dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            dir?.mkdirs()
+            val file = File(dir, fileName)
+            file.writeText(sb.toString(), Charsets.UTF_8)
+
+            if (file.length() < 100) {
+                Toast.makeText(this, "KML内容过少，请检查轨迹数据", Toast.LENGTH_LONG).show()
+                return
+            }
 
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
             val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
@@ -861,7 +883,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(android.content.Intent.createChooser(shareIntent, "导出KML文件"))
-            Toast.makeText(this, "KML已生成", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "KML已生成（" + points.size + " 个点）", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "导出失败: " + e.message, Toast.LENGTH_LONG).show()
         }
@@ -942,6 +964,103 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .setTitle(day + " 详细数据")
             .setMessage(sb.toString())
             .setPositiveButton("确定", null)
+            .show()
+    }
+
+    // ==================== 历史轨迹 ====================
+    private fun saveCurrentTrackToHistory() {
+        if (trackPoints.size < 2) return
+        val day = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val key = day + "_" + SimpleDateFormat("HHmmss", Locale.getDefault()).format(Date())
+        historyTracks[key] = trackPoints.toMutableList()
+        saveHistoryTracks()
+    }
+
+    private fun loadHistoryTracks() {
+        val prefs = getSharedPreferences("history_tracks", MODE_PRIVATE)
+        val all = prefs.all
+        historyTracks.clear()
+        for ((key, value) in all) {
+            try {
+                val json = value as? String ?: continue
+                val list = mutableListOf<TrackPoint>()
+                val parts = json.split("|")
+                for (p in parts) {
+                    if (p.isBlank()) continue
+                    val arr = p.split(",")
+                    if (arr.size >= 2) {
+                        list.add(TrackPoint(arr[0].toDouble(), arr[1].toDouble(), arr.getOrNull(2)?.toDouble() ?: 0.0))
+                    }
+                }
+                if (list.isNotEmpty()) historyTracks[key] = list
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun saveHistoryTracks() {
+        val prefs = getSharedPreferences("history_tracks", MODE_PRIVATE)
+        val editor = prefs.edit()
+        editor.clear()
+        for ((key, list) in historyTracks) {
+            val sb = StringBuilder()
+            for (p in list) {
+                sb.append(p.latitude).append(",").append(p.longitude).append(",").append(p.altitude).append("|")
+            }
+            editor.putString(key, sb.toString())
+        }
+        editor.apply()
+    }
+
+    private fun showHistoryTrackDialog() {
+        if (trackPoints.size >= 2) {
+            saveCurrentTrackToHistory()
+        }
+
+        if (historyTracks.isEmpty()) {
+            Toast.makeText(this, "暂无历史轨迹", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val keys = historyTracks.keys.sortedDescending().toTypedArray()
+        val items = keys.map { key ->
+            val count = historyTracks[key]?.size ?: 0
+            key.replace("_", " ") + "  （" + count + " 个点）"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("历史轨迹列表")
+            .setItems(items) { _, which ->
+                val selectedKey = keys[which]
+                val selectedTrack = historyTracks[selectedKey] ?: return@setItems
+                showTrackOptions(selectedKey, selectedTrack)
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    private fun showTrackOptions(key: String, track: List<TrackPoint>) {
+        val options = arrayOf("在预览中显示此轨迹", "导出此轨迹为 KML", "删除此轨迹")
+        AlertDialog.Builder(this)
+            .setTitle(key.replace("_", " "))
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        trackPoints.clear()
+                        trackPoints.addAll(track)
+                        trackView.updateTrack(trackPoints, null, null)
+                        Toast.makeText(this, "已加载到预览窗口", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
+                        exportKmlWithTrack(track, key)
+                    }
+                    2 -> {
+                        historyTracks.remove(key)
+                        saveHistoryTracks()
+                        Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 }
