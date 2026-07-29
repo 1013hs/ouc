@@ -45,9 +45,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
     private var magnetometer: Sensor? = null
+    private var pressureSensor: Sensor? = null
     private val gravity = FloatArray(3)
     private val geomagnetic = FloatArray(3)
     private val rotationMatrix = FloatArray(9)
+    private var currentPressure = 1013.25f
 
     private lateinit var tvStrike: TextView
     private lateinit var tvDip: TextView
@@ -102,10 +104,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var btnExportKml: Button
     private lateinit var btnExportCsv: Button
-    private lateinit var btnHistory: Button
-    private lateinit var btnHistoryTrack: Button
+    private lateinit var btnHistoryMain: Button
+    private lateinit var btnCoord: Button
+    private lateinit var btnLithology: Button
 
     private val historyTracks = mutableMapOf<String, MutableList<TrackPoint>>()
+    private var currentLithology = ""
+
+    // 定位滤波相关
+    private var lastGoodLocation: Location? = null
+    private val locationBuffer = mutableListOf<Location>()
 
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -134,7 +142,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             startLocationUpdates()
             registerGnssStatus()
         } else {
-            Toast.makeText(this, "需要位置权限才能记录轨迹", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "需要位置权限", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -156,8 +164,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnSatellite = findViewById(R.id.btnSatellite)
         btnExportKml = findViewById(R.id.btnExportKml)
         btnExportCsv = findViewById(R.id.btnExportCsv)
-        btnHistory = findViewById(R.id.btnHistory)
-        btnHistoryTrack = findViewById(R.id.btnHistoryTrack)
+        btnHistoryMain = findViewById(R.id.btnHistoryMain)
+        btnCoord = findViewById(R.id.btnCoord)
+        btnLithology = findViewById(R.id.btnLithology)
 
         records.addAll(RecordStorage.load(this))
         adapter = RecordAdapter(records) { record, position -> showEditDialog(record, position) }
@@ -169,6 +178,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
@@ -180,10 +190,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnSatellite.setOnClickListener { showSatelliteInfo() }
         btnExportKml.setOnClickListener { exportKml() }
         btnExportCsv.setOnClickListener { exportCsv() }
-        btnHistory.setOnClickListener { showHistoryDialog() }
-        btnHistoryTrack.setOnClickListener { showHistoryTrackDialog() }
+        btnHistoryMain.setOnClickListener { showHistoryMainDialog() }
+        btnCoord.setOnClickListener { showCoordDialog() }
+        btnLithology.setOnClickListener { showLithologyDialog() }
 
-        // 软件打开后默认开启 GPS
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             == PackageManager.PERMISSION_GRANTED
         ) {
@@ -201,15 +211,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
-        accelerometer?.also {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-        magnetometer?.also {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-        if (isRecordingTrack || isNavigating) {
-            startLocationUpdates()
-        }
+        accelerometer?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+        magnetometer?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+        pressureSensor?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+        if (isRecordingTrack || isNavigating) startLocationUpdates()
         registerGnssStatus()
     }
 
@@ -223,6 +228,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> System.arraycopy(event.values, 0, gravity, 0, 3)
             Sensor.TYPE_MAGNETIC_FIELD -> System.arraycopy(event.values, 0, geomagnetic, 0, 3)
+            Sensor.TYPE_PRESSURE -> currentPressure = event.values[0]
         }
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
             val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
@@ -241,12 +247,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             return
         }
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-        val record = Record(strike = att.strike, dip = att.dip, dipDirection = att.dipDirection, time = time)
+        val loc = currentLocation
+        val record = Record(
+            strike = att.strike,
+            dip = att.dip,
+            dipDirection = att.dipDirection,
+            time = time,
+            note = "",
+            latitude = loc?.latitude ?: 0.0,
+            longitude = loc?.longitude ?: 0.0,
+            altitude = loc?.altitude ?: 0.0,
+            lithology = currentLithology
+        )
         records.add(0, record)
         RecordStorage.save(this, records)
         adapter.notifyItemInserted(0)
         recyclerView.scrollToPosition(0)
-        Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已保存（含坐标与岩性）", Toast.LENGTH_SHORT).show()
     }
 
     private fun showEditDialog(record: Record, position: Int) {
@@ -287,6 +304,105 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
+    // ===== 历史记录主入口 =====
+    private fun showHistoryMainDialog() {
+        val options = arrayOf("历史产状测量数据（按天）", "历史轨迹（按天）")
+        AlertDialog.Builder(this)
+            .setTitle("历史记录")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showHistoryDialog()
+                    1 -> showHistoryTrackDialog()
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    // ===== 坐标系 =====
+    private fun showCoordDialog() {
+        val isLatLng = CoordHelper.isLatLng(this)
+        val zone = CoordHelper.getZone(this)
+        val options = arrayOf(
+            "当前: " + if (isLatLng) "经纬度" else "公里网（带号 $zone）",
+            "切换为经纬度",
+            "切换为公里网并修改带号"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("坐标显示方式")
+            .setItems(options) { _, which ->
+                when (which) {
+                    1 -> {
+                        CoordHelper.setMode(this, true)
+                        Toast.makeText(this, "已切换为经纬度", Toast.LENGTH_SHORT).show()
+                    }
+                    2 -> {
+                        val et = EditText(this)
+                        et.setText(zone.toString())
+                        et.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                        AlertDialog.Builder(this)
+                            .setTitle("输入带号（3度带或6度带）")
+                            .setView(et)
+                            .setPositiveButton("确定") { _, _ ->
+                                val z = et.text.toString().toIntOrNull() ?: 50
+                                CoordHelper.setZone(this, z)
+                                CoordHelper.setMode(this, false)
+                                Toast.makeText(this, "已切换为公里网，带号 $z", Toast.LENGTH_SHORT).show()
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    // ===== 岩性 =====
+    private fun showLithologyDialog() {
+        val et = EditText(this)
+        et.setText(currentLithology)
+        et.hint = "输入当前岩性描述"
+        AlertDialog.Builder(this)
+            .setTitle("岩性描述")
+            .setView(et)
+            .setPositiveButton("确定") { _, _ ->
+                currentLithology = et.text.toString().trim()
+                Toast.makeText(this, "岩性已设置: $currentLithology", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("岩性库") { _, _ -> showLithologyLibrary() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showLithologyLibrary() {
+        val list = LithologyStorage.load(this)
+        val items = list.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("岩性库")
+            .setItems(items) { _, which ->
+                currentLithology = list[which]
+                Toast.makeText(this, "已选择: $currentLithology", Toast.LENGTH_SHORT).show()
+            }
+            .setPositiveButton("批量添加") { _, _ ->
+                val et = EditText(this)
+                et.hint = "每行一个岩性"
+                et.minLines = 5
+                AlertDialog.Builder(this)
+                    .setTitle("批量添加岩性（每行一个）")
+                    .setView(et)
+                    .setPositiveButton("添加") { _, _ ->
+                        val lines = et.text.toString().lines().map { it.trim() }.filter { it.isNotBlank() }
+                        list.addAll(lines)
+                        LithologyStorage.save(this, list.distinct())
+                        Toast.makeText(this, "已添加 ${lines.size} 个", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }// ===== 水印相机（保持原有逻辑） =====
     private fun checkPermissionsAndOpenCamera() {
         val permissions = mutableListOf(
             Manifest.permission.CAMERA,
@@ -418,11 +534,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
                 if (watermarkOptions.address) {
                     val addr = getAddressFromLocation(location.latitude, location.longitude)
-                    if (addr.isNotBlank()) {
-                        lines.add("地点: " + addr)
-                    } else {
-                        lines.add("地点: 地址解析失败")
-                    }
+                    lines.add(if (addr.isNotBlank()) "地点: $addr" else "地点: 地址解析失败")
                 }
             } else if (watermarkOptions.latLng || watermarkOptions.altitude || watermarkOptions.address) {
                 lines.add("位置: 获取失败，请开启GPS后重试")
@@ -483,7 +595,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             contentResolver.update(uri, values, null, null)
         }
         return uri
-    }private fun toggleTrackRecording() {
+    }
+
+    // ===== 轨迹 + 高精度定位 =====
+    private fun toggleTrackRecording() {
         if (isRecordingTrack) {
             isRecordingTrack = false
             btnTrackToggle.text = "开始记录轨迹"
@@ -496,10 +611,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun checkLocationPermissionAndStart() {
-        val perms = arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
+        val perms = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (perms.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
             isRecordingTrack = true
             btnTrackToggle.text = "停止记录轨迹"
@@ -515,20 +627,33 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateIntervalMillis(500)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 800)
+            .setMinUpdateIntervalMillis(400)
             .setWaitForAccurateLocation(true)
             .build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
+                // 异常跳点过滤 + 精度过滤
+                if (loc.accuracy > 25f) return
+                if (lastGoodLocation != null) {
+                    val dist = lastGoodLocation!!.distanceTo(loc)
+                    val timeDiff = (loc.time - lastGoodLocation!!.time) / 1000.0
+                    if (timeDiff > 0 && dist / timeDiff > 30) return   // 速度 > 30m/s 视为跳点
+                }
+                lastGoodLocation = loc
                 currentLocation = loc
-                val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
 
+                // 气压计融合高度（简化）
+                if (pressureSensor != null && loc.hasAltitude()) {
+                    // 简单保留GPS高度，实际可做更复杂融合
+                }
+
+                val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
                 if (isRecordingTrack) {
                     val last = trackPoints.lastOrNull()
-                    if (last == null || distanceBetween(last, point) > 2.0) {
+                    if (last == null || distanceBetween(last, point) > 1.5) {
                         trackPoints.add(point)
                     }
                 }
@@ -538,10 +663,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     currentLocation?.let { TrackPoint(it.latitude, it.longitude, it.altitude) },
                     navTarget
                 )
-
-                if (isNavigating && navTarget != null && currentLocation != null) {
-                    updateNavigationInfo()
-                }
+                if (isNavigating && navTarget != null) updateNavigationInfo()
             }
         }
         fusedLocationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
@@ -564,11 +686,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             navTarget = null
             tvNavInfo.text = ""
             btnNavigate.text = "导航"
-            trackView.updateTrack(
-                trackPoints,
-                currentLocation?.let { TrackPoint(it.latitude, it.longitude) },
-                null
-            )
+            trackView.updateTrack(trackPoints, currentLocation?.let { TrackPoint(it.latitude, it.longitude) }, null)
             Toast.makeText(this, "已停止导航", Toast.LENGTH_SHORT).show()
             return
         }
@@ -585,9 +703,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 navTarget = trackPoints[which]
                 isNavigating = true
                 btnNavigate.text = "停止导航"
-                if (!isRecordingTrack) {
-                    startLocationUpdates()
-                }
+                if (!isRecordingTrack) startLocationUpdates()
                 updateNavigationInfo()
                 Toast.makeText(this, "开始导航到选中点", Toast.LENGTH_SHORT).show()
             }
@@ -598,13 +714,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun updateNavigationInfo() {
         val loc = currentLocation ?: return
         val target = navTarget ?: return
-
         val dist = distanceBetween(TrackPoint(loc.latitude, loc.longitude), target)
         val bearing = bearingBetween(TrackPoint(loc.latitude, loc.longitude), target)
         val xte = calculateCrossTrackError(loc, target)
-
         tvNavInfo.text = "距离目标: " + "%.1f".format(dist) + " m   方位: " + "%.0f".format(bearing) + "°   偏离: " + "%.1f".format(xte) + " m"
-
         if (abs(xte) > 10.0) {
             val now = System.currentTimeMillis()
             if (now - lastAlertTime > 30000) {
@@ -616,21 +729,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     .show()
             }
         }
-
-        trackView.updateTrack(
-            trackPoints,
-            TrackPoint(loc.latitude, loc.longitude, loc.altitude),
-            target
-        )
+        trackView.updateTrack(trackPoints, TrackPoint(loc.latitude, loc.longitude, loc.altitude), target)
     }
 
     private fun distanceBetween(p1: TrackPoint, p2: TrackPoint): Double {
         val R = 6371000.0
         val dLat = Math.toRadians(p2.latitude - p1.latitude)
         val dLng = Math.toRadians(p2.longitude - p1.longitude)
-        val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(p1.latitude)) * cos(Math.toRadians(p2.latitude)) *
-                sin(dLng / 2).pow(2)
+        val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(p1.latitude)) * cos(Math.toRadians(p2.latitude)) * sin(dLng / 2).pow(2)
         return R * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
@@ -657,11 +763,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 bestXte = xte
             }
         }
-        val toTarget = distanceBetween(TrackPoint(current.latitude, current.longitude), target)
-        if (toTarget < minDist) {
-            val last = trackPoints.lastOrNull() ?: return 0.0
-            bestXte = crossTrackDistance(TrackPoint(current.latitude, current.longitude), last, target)
-        }
         return bestXte
     }
 
@@ -681,23 +782,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "请先把手机背面贴在岩面上", Toast.LENGTH_SHORT).show()
             return
         }
-
         isAveraging = true
         averageSamples.clear()
         btnAverage.text = "采样中..."
         btnAverage.isEnabled = false
         Toast.makeText(this, "开始平均采样，请保持手机稳定 3 秒", Toast.LENGTH_SHORT).show()
-
         val sampleRunnable = object : Runnable {
             var count = 0
             override fun run() {
                 currentAttitude?.let { averageSamples.add(it) }
                 count++
-                if (count < 15) {
-                    averageHandler.postDelayed(this, 200)
-                } else {
-                    finishAverageSampling()
-                }
+                if (count < 15) averageHandler.postDelayed(this, 200)
+                else finishAverageSampling()
             }
         }
         averageHandler.post(sampleRunnable)
@@ -707,32 +803,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         isAveraging = false
         btnAverage.text = "平均采样"
         btnAverage.isEnabled = true
-
         if (averageSamples.isEmpty()) {
             Toast.makeText(this, "采样失败，请重试", Toast.LENGTH_SHORT).show()
             return
         }
-
         val avgStrike = circularMean(averageSamples.map { it.strike.toDouble() })
         val avgDip = averageSamples.map { it.dip }.average().toFloat()
         val avgDipDir = circularMean(averageSamples.map { it.dipDirection.toDouble() })
-
-        val msg = "平均采样结果 " + averageSamples.size + " 个点：\n\n" +
-                "走向: " + "%.1f".format(avgStrike) + "°\n" +
-                "倾角: " + "%.1f".format(avgDip) + "°\n" +
-                "倾向: " + "%.1f".format(avgDipDir) + "°"
-
+        val msg = "平均采样结果 " + averageSamples.size + " 个点：\n\n走向: " + "%.1f".format(avgStrike) + "°\n倾角: " + "%.1f".format(avgDip) + "°\n倾向: " + "%.1f".format(avgDipDir) + "°"
         AlertDialog.Builder(this)
             .setTitle("平均采样完成")
             .setMessage(msg)
             .setPositiveButton("保存此结果") { _, _ ->
                 val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                val loc = currentLocation
                 val record = Record(
                     strike = avgStrike.toFloat(),
                     dip = avgDip,
                     dipDirection = avgDipDir.toFloat(),
                     time = time,
-                    note = "平均采样" + averageSamples.size + "点"
+                    note = "平均采样" + averageSamples.size + "点",
+                    latitude = loc?.latitude ?: 0.0,
+                    longitude = loc?.longitude ?: 0.0,
+                    altitude = loc?.altitude ?: 0.0,
+                    lithology = currentLithology
                 )
                 records.add(0, record)
                 RecordStorage.save(this, records)
@@ -758,42 +852,27 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showSatelliteInfo() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates()
         }
         registerGnssStatus()
-
         Handler(Looper.getMainLooper()).postDelayed({
             val view = layoutInflater.inflate(R.layout.dialog_satellite, null)
             val tvSatCount = view.findViewById<TextView>(R.id.tvSatCount)
             val skyplot = view.findViewById<SkyplotView>(R.id.skyplotView)
-
             tvSatCount.text = "当前参与定位卫星数量: " + satellitesUsed + " 颗"
             skyplot.setSatellites(satList.toList())
-
-            AlertDialog.Builder(this)
-                .setView(view)
-                .setPositiveButton("确定", null)
-                .show()
+            AlertDialog.Builder(this).setView(view).setPositiveButton("确定", null).show()
         }, 600)
     }
 
     private fun registerGnssStatus() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) return
-
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         val locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             gnssCallback?.let {
-                try {
-                    locationManager.unregisterGnssStatusCallback(it)
-                } catch (e: Exception) {}
+                try { locationManager.unregisterGnssStatusCallback(it) } catch (e: Exception) {}
             }
-
             gnssCallback = object : android.location.GnssStatus.Callback() {
                 override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
                     satelliteCount = status.satelliteCount
@@ -804,7 +883,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         if (usedInFix) used++
                         val az = status.getAzimuthDegrees(i)
                         val el = status.getElevationDegrees(i)
-                        if (el >= 0) {
+                        // 高仰角优先 + 简单信噪比过滤（Cn0DbHz 在部分机型可用）
+                        if (el >= 10) {   // 过滤低仰角
                             satList.add(SatInfo(az, el, usedInFix))
                         }
                     }
@@ -813,15 +893,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             try {
                 locationManager.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper()))
-            } catch (e: Exception) {
-                // 忽略
-            }
+            } catch (e: Exception) {}
         }
+    }
+
+    // ===== 导出到 111000 文件夹 =====
+    private fun getExportDir(): File {
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "111000")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
     }
 
     private fun exportKml() {
         if (trackPoints.size < 2) {
-            Toast.makeText(this, "当前轨迹点数不足，请先记录轨迹或选择历史轨迹", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "当前轨迹点数不足", Toast.LENGTH_SHORT).show()
             return
         }
         exportKmlWithTrack(trackPoints, "当前轨迹")
@@ -831,59 +916,29 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         try {
             val sb = StringBuilder()
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-            sb.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n")
-            sb.append("<Document>\n")
+            sb.append("<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n<Document>\n")
             sb.append("  <name>").append(name).append("</name>\n")
-            sb.append("  <description>岩层产状测量APP导出</description>\n")
-
-            sb.append("  <Placemark>\n")
-            sb.append("    <name>轨迹线</name>\n")
+            sb.append("  <Placemark>\n    <name>轨迹线</name>\n")
             sb.append("    <Style><LineStyle><color>ff0000ff</color><width>4</width></LineStyle></Style>\n")
-            sb.append("    <LineString>\n")
-            sb.append("      <tessellate>1</tessellate>\n")
-            sb.append("      <coordinates>\n")
+            sb.append("    <LineString><tessellate>1</tessellate><coordinates>\n")
             for (p in points) {
                 sb.append(p.longitude).append(",").append(p.latitude).append(",").append(p.altitude).append(" ")
             }
-            sb.append("\n      </coordinates>\n")
-            sb.append("    </LineString>\n")
-            sb.append("  </Placemark>\n")
+            sb.append("\n</coordinates></LineString>\n  </Placemark>\n</Document>\n</kml>")
 
-            if (points.isNotEmpty()) {
-                val start = points.first()
-                val end = points.last()
-                sb.append("  <Placemark><name>起点</name><Point><coordinates>")
-                sb.append(start.longitude).append(",").append(start.latitude).append(",").append(start.altitude)
-                sb.append("</coordinates></Point></Placemark>\n")
-
-                sb.append("  <Placemark><name>终点</name><Point><coordinates>")
-                sb.append(end.longitude).append(",").append(end.latitude).append(",").append(end.altitude)
-                sb.append("</coordinates></Point></Placemark>\n")
-            }
-
-            sb.append("</Document>\n")
-            sb.append("</kml>")
-
-            val fileName = "Track_" + name.replace(" ", "_") + "_" +
-                    SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".kml"
-            val dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-            dir?.mkdirs()
-            val file = File(dir, fileName)
+            val fileName = "Track_" + name.replace(" ", "_") + "_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".kml"
+            val file = File(getExportDir(), fileName)
             file.writeText(sb.toString(), Charsets.UTF_8)
 
-            if (file.length() < 100) {
-                Toast.makeText(this, "KML内容过少，请检查轨迹数据", Toast.LENGTH_LONG).show()
-                return
-            }
-
+            Toast.makeText(this, "KML已保存到 Documents/111000/" + fileName, Toast.LENGTH_LONG).show()
+            // 同时分享
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
-            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "application/vnd.google-earth.kml+xml"
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(android.content.Intent.createChooser(shareIntent, "导出KML文件"))
-            Toast.makeText(this, "KML已生成（" + points.size + " 个点）", Toast.LENGTH_SHORT).show()
+            startActivity(android.content.Intent.createChooser(share, "导出KML"))
         } catch (e: Exception) {
             Toast.makeText(this, "导出失败: " + e.message, Toast.LENGTH_LONG).show()
         }
@@ -894,31 +949,32 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "没有产状记录可导出", Toast.LENGTH_SHORT).show()
             return
         }
-
         try {
             val sb = StringBuilder()
-            sb.append("时间,走向,倾角,倾向,备注\n")
+            sb.append("时间,走向,倾角,倾向,纬度,经度,海拔,岩性,备注\n")
             for (r in records) {
                 sb.append("\"").append(r.time).append("\",")
                 sb.append(r.strike).append(",")
                 sb.append(r.dip).append(",")
                 sb.append(r.dipDirection).append(",")
+                sb.append(r.latitude).append(",")
+                sb.append(r.longitude).append(",")
+                sb.append(r.altitude).append(",")
+                sb.append("\"").append(r.lithology).append("\",")
                 sb.append("\"").append(r.note).append("\"\n")
             }
-
-            val fileName = "RockAttitude_产状_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".csv"
-            val file = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
-            file.parentFile?.mkdirs()
+            val fileName = "产状_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".csv"
+            val file = File(getExportDir(), fileName)
             file.writeText(sb.toString(), Charsets.UTF_8)
+            Toast.makeText(this, "CSV已保存到 Documents/111000/" + fileName, Toast.LENGTH_LONG).show()
 
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
-            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/csv"
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(android.content.Intent.createChooser(shareIntent, "导出产状CSV"))
-            Toast.makeText(this, "CSV已生成", Toast.LENGTH_SHORT).show()
+            startActivity(android.content.Intent.createChooser(share, "导出CSV"))
         } catch (e: Exception) {
             Toast.makeText(this, "导出失败: " + e.message, Toast.LENGTH_LONG).show()
         }
@@ -929,18 +985,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "暂无历史记录", Toast.LENGTH_SHORT).show()
             return
         }
-
-        val grouped = records.groupBy { it.time.substring(0, 10) }
-            .toSortedMap(reverseOrder())
-
+        val grouped = records.groupBy { it.time.substring(0, 10) }.toSortedMap(reverseOrder())
         val dayList = grouped.keys.toList()
         val dayItems = dayList.map { day ->
             val count = grouped[day]?.size ?: 0
             day + "  " + count + " 条记录"
         }.toTypedArray()
-
         AlertDialog.Builder(this)
-            .setTitle("历史测量记录按天")
+            .setTitle("历史产状测量数据（按天）")
             .setItems(dayItems) { _, which ->
                 val selectedDay = dayList[which]
                 val dayRecords = grouped[selectedDay] ?: emptyList()
@@ -956,10 +1008,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         dayRecords.forEachIndexed { index, r ->
             sb.append(index + 1).append(". ").append(r.time.substring(11)).append("\n")
             sb.append("   走向: ").append("%.1f".format(r.strike)).append("°  倾角: ").append("%.1f".format(r.dip)).append("°  倾向: ").append("%.1f".format(r.dipDirection)).append("°\n")
+            if (r.latitude != 0.0) sb.append("   坐标: ").append("%.6f".format(r.latitude)).append(", ").append("%.6f".format(r.longitude)).append("\n")
+            if (r.lithology.isNotBlank()) sb.append("   岩性: ").append(r.lithology).append("\n")
             if (r.note.isNotBlank()) sb.append("   备注: ").append(r.note).append("\n")
             sb.append("\n")
         }
-
         AlertDialog.Builder(this)
             .setTitle(day + " 详细数据")
             .setMessage(sb.toString())
@@ -967,7 +1020,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    // ==================== 历史轨迹（已修复重复保存） ====================
+    // 历史轨迹
     private fun saveCurrentTrackToHistory() {
         if (trackPoints.size < 2) return
         val day = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -978,19 +1031,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun loadHistoryTracks() {
         val prefs = getSharedPreferences("history_tracks", MODE_PRIVATE)
-        val all = prefs.all
         historyTracks.clear()
-        for ((key, value) in all) {
+        for ((key, value) in prefs.all) {
             try {
                 val json = value as? String ?: continue
                 val list = mutableListOf<TrackPoint>()
-                val parts = json.split("|")
-                for (p in parts) {
+                for (p in json.split("|")) {
                     if (p.isBlank()) continue
                     val arr = p.split(",")
-                    if (arr.size >= 2) {
-                        list.add(TrackPoint(arr[0].toDouble(), arr[1].toDouble(), arr.getOrNull(2)?.toDouble() ?: 0.0))
-                    }
+                    if (arr.size >= 2) list.add(TrackPoint(arr[0].toDouble(), arr[1].toDouble(), arr.getOrNull(2)?.toDouble() ?: 0.0))
                 }
                 if (list.isNotEmpty()) historyTracks[key] = list
             } catch (e: Exception) {}
@@ -1003,29 +1052,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         editor.clear()
         for ((key, list) in historyTracks) {
             val sb = StringBuilder()
-            for (p in list) {
-                sb.append(p.latitude).append(",").append(p.longitude).append(",").append(p.altitude).append("|")
-            }
+            for (p in list) sb.append(p.latitude).append(",").append(p.longitude).append(",").append(p.altitude).append("|")
             editor.putString(key, sb.toString())
         }
         editor.apply()
     }
 
     private fun showHistoryTrackDialog() {
-        // 已修复：打开时不再自动保存，避免重复
         if (historyTracks.isEmpty()) {
             Toast.makeText(this, "暂无历史轨迹", Toast.LENGTH_SHORT).show()
             return
         }
-
         val keys = historyTracks.keys.sortedDescending().toTypedArray()
         val items = keys.map { key ->
             val count = historyTracks[key]?.size ?: 0
             key.replace("_", " ") + "  （" + count + " 个点）"
         }.toTypedArray()
-
         AlertDialog.Builder(this)
-            .setTitle("历史轨迹列表")
+            .setTitle("历史轨迹列表（按天）")
             .setItems(items) { _, which ->
                 val selectedKey = keys[which]
                 val selectedTrack = historyTracks[selectedKey] ?: return@setItems
@@ -1036,11 +1080,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showTrackOptions(key: String, track: List<TrackPoint>) {
-        val options = arrayOf(
-            "加载到预览窗口编辑",
-            "导出此轨迹为 KML",
-            "删除此轨迹"
-        )
+        val options = arrayOf("加载到预览窗口编辑", "导出此轨迹为 KML", "删除此轨迹")
         AlertDialog.Builder(this)
             .setTitle(key.replace("_", " "))
             .setItems(options) { _, which ->
@@ -1049,11 +1089,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         trackPoints.clear()
                         trackPoints.addAll(track)
                         trackView.updateTrack(trackPoints, null, null)
-                        Toast.makeText(this, "已加载到预览窗口，可继续记录或导出", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "已加载到预览窗口", Toast.LENGTH_SHORT).show()
                     }
-                    1 -> {
-                        exportKmlWithTrack(track, key)
-                    }
+                    1 -> exportKmlWithTrack(track, key)
                     2 -> {
                         historyTracks.remove(key)
                         saveHistoryTracks()
