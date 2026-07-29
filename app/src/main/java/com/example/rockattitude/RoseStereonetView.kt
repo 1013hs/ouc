@@ -73,7 +73,7 @@ class RoseStereonetView @JvmOverloads constructor(
         }
 
         // ===== 玫瑰花图（走向） =====
-        val binSize = 10 // 每10°一个扇区
+        val binSize = 10
         val bins = IntArray(36)
         for (s in strikes) {
             val bin = ((s % 360) / binSize).toInt().coerceIn(0, 35)
@@ -86,7 +86,7 @@ class RoseStereonetView @JvmOverloads constructor(
             val count = bins[i]
             if (count == 0) continue
             val r = radius * 0.85f * count / maxCount
-            val startAngle = i * binSize - 90f // 北为0
+            val startAngle = i * binSize - 90f
             val sweep = binSize.toFloat()
 
             path.reset()
@@ -96,12 +96,12 @@ class RoseStereonetView @JvmOverloads constructor(
             canvas.drawPath(path, paintRose)
         }
 
-        // ===== 赤平投影极点（简化等面积） =====
+        // ===== 赤平投影极点（等面积近似） =====
         for (i in dips.indices) {
             val dip = dips[i]
             val dipDir = dipDirs[i]
-            // 极点：倾向方向，距离圆心与倾角相关（等面积近似）
-            val r = radius * sqrt(2.0) * sin(Math.toRadians(dip / 2.0)).toFloat()
+            // 修复类型：全部转为 Float
+            val r = (radius * sqrt(2.0) * sin(Math.toRadians(dip / 2.0))).toFloat()
             val azRad = Math.toRadians(dipDir.toDouble())
             val x = cx + r * sin(azRad).toFloat()
             val y = cy - r * cos(azRad).toFloat()
