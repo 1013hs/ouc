@@ -24,6 +24,7 @@ import android.provider.MediaStore
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,7 +48,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val gravity = FloatArray(3)
     private val geomagnetic = FloatArray(3)
     private val rotationMatrix = FloatArray(9)
-    private var currentPressure = 1013.25f
 
     private lateinit var tvStrike: TextView
     private lateinit var tvDip: TextView
@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var tvLatestRecord: TextView
     private lateinit var btnSave: Button
     private lateinit var btnCamera: Button
+    private lateinit var btnBorehole: Button
 
     private val records = mutableListOf<Record>()
     private var currentAttitude: Attitude? = null
@@ -112,11 +113,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var lastGoodLocation: Location? = null
 
     private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success && photoFile != null && photoFile!!.exists()) {
-            processAndSaveWatermarkedPhoto(photoFile!!)
-        } else {
-            Toast.makeText(this, "拍照取消或失败", Toast.LENGTH_SHORT).show()
-        }
+        if (success && photoFile != null && photoFile!!.exists()) processAndSaveWatermarkedPhoto(photoFile!!)
+        else Toast.makeText(this, "拍照取消或失败", Toast.LENGTH_SHORT).show()
     }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -128,6 +126,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (result.values.all { it }) {
             startLocationUpdates()
             registerGnssStatus()
+            forceRefreshLocation()
         } else Toast.makeText(this, "需要位置权限", Toast.LENGTH_LONG).show()
     }
 
@@ -142,6 +141,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvLatestRecord = findViewById(R.id.tvLatestRecord)
         btnSave = findViewById(R.id.btnSave)
         btnCamera = findViewById(R.id.btnCamera)
+        btnBorehole = findViewById(R.id.btnBorehole)
         trackView = findViewById(R.id.trackView)
         btnTrackToggle = findViewById(R.id.btnTrackToggle)
         btnNavigate = findViewById(R.id.btnNavigate)
@@ -156,7 +156,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         records.addAll(RecordStorage.load(this))
         updateLatestRecordView()
-
         loadHistoryTracks()
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
@@ -177,15 +176,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnHistoryMain.setOnClickListener { showHistoryMainDialog() }
         btnCoord.setOnClickListener { showCoordDialog() }
         btnLithology.setOnClickListener { showLithologyDialog() }
+        btnBorehole.setOnClickListener { showBoreholeDialog() }
 
-        // 点击坐标窗口放大查看轨迹点
         tvCurrentCoord.setOnClickListener { showAllTrackPointsDialog() }
-        // 点击最新记录放大查看全部
         tvLatestRecord.setOnClickListener { showAllRecordsDialog() }
 
+        // 打开软件后默认开启GPS并强制刷新定位（修复部分机型无法获取坐标）
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates()
             registerGnssStatus()
+            forceRefreshLocation()
         } else {
             locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
@@ -210,7 +210,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> System.arraycopy(event.values, 0, gravity, 0, 3)
             Sensor.TYPE_MAGNETIC_FIELD -> System.arraycopy(event.values, 0, geomagnetic, 0, 3)
-            Sensor.TYPE_PRESSURE -> currentPressure = event.values[0]
         }
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
             val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
@@ -222,6 +221,41 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    // 强制刷新定位（解决部分机型打开后无坐标问题）
+    private fun forceRefreshLocation() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val client = LocationServices.getFusedLocationProviderClient(this)
+        client.lastLocation.addOnSuccessListener { loc ->
+            if (loc != null) {
+                currentLocation = loc
+                updateCoordDisplay()
+                Thread {
+                    val addr = getAddressFromLocation(loc.latitude, loc.longitude)
+                    runOnUiThread {
+                        currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
+                        updateCoordDisplay()
+                    }
+                }.start()
+            }
+        }
+        val token = CancellationTokenSource()
+        client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
+            .addOnSuccessListener { loc ->
+                if (loc != null) {
+                    currentLocation = loc
+                    lastGoodLocation = loc
+                    updateCoordDisplay()
+                    Thread {
+                        val addr = getAddressFromLocation(loc.latitude, loc.longitude)
+                        runOnUiThread {
+                            currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
+                            updateCoordDisplay()
+                        }
+                    }.start()
+                }
+            }
+    }
 
     private fun updateCoordDisplay() {
         val loc = currentLocation
@@ -244,9 +278,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val sb = StringBuilder()
         sb.append(r.time).append("\n")
         sb.append("走向: ").append("%.1f".format(r.strike)).append("°  倾角: ").append("%.1f".format(r.dip)).append("°  倾向: ").append("%.1f".format(r.dipDirection)).append("°\n")
-        if (r.latitude != 0.0) {
-            sb.append("坐标: ").append("%.6f".format(r.latitude)).append(", ").append("%.6f".format(r.longitude)).append("\n")
-        }
+        if (r.latitude != 0.0) sb.append("坐标: ").append("%.6f".format(r.latitude)).append(", ").append("%.6f".format(r.longitude)).append("\n")
         if (r.lithology.isNotBlank()) sb.append("岩性: ").append(r.lithology).append("\n")
         if (r.note.isNotBlank()) sb.append("备注: ").append(r.note)
         tvLatestRecord.text = sb.toString()
@@ -265,11 +297,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             if (p.altitude != 0.0) sb.append("  海拔").append("%.1f".format(p.altitude)).append("m")
             sb.append("\n")
         }
-        AlertDialog.Builder(this)
-            .setTitle("本次轨迹点坐标")
-            .setMessage(sb.toString())
-            .setPositiveButton("确定", null)
-            .show()
+        AlertDialog.Builder(this).setTitle("本次轨迹点坐标").setMessage(sb.toString()).setPositiveButton("确定", null).show()
     }
 
     private fun showAllRecordsDialog() {
@@ -290,11 +318,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             if (r.note.isNotBlank()) sb.append("备注: ").append(r.note).append("\n")
             sb.append("\n")
         }
-        AlertDialog.Builder(this)
-            .setTitle("全部保存记录（共" + records.size + "条）")
-            .setMessage(sb.toString())
-            .setPositiveButton("确定", null)
-            .show()
+        AlertDialog.Builder(this).setTitle("全部保存记录（共" + records.size + "条）").setMessage(sb.toString()).setPositiveButton("确定", null).show()
     }
 
     private fun saveCurrent() {
@@ -305,20 +329,100 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         val loc = currentLocation
         val record = Record(
-            strike = att.strike,
-            dip = att.dip,
-            dipDirection = att.dipDirection,
-            time = time,
-            note = "",
-            latitude = loc?.latitude ?: 0.0,
-            longitude = loc?.longitude ?: 0.0,
-            altitude = loc?.altitude ?: 0.0,
-            lithology = currentLithology
+            strike = att.strike, dip = att.dip, dipDirection = att.dipDirection,
+            time = time, note = "",
+            latitude = loc?.latitude ?: 0.0, longitude = loc?.longitude ?: 0.0,
+            altitude = loc?.altitude ?: 0.0, lithology = currentLithology
         )
         records.add(0, record)
         RecordStorage.save(this, records)
         updateLatestRecordView()
         Toast.makeText(this, "已保存（含坐标与岩性）", Toast.LENGTH_SHORT).show()
+    }
+
+    // ==================== 钻孔计算 ====================
+    private fun showBoreholeDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 10)
+        }
+
+        val etLat = EditText(this).apply { hint = "孔口纬度（例如 30.123456）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED }
+        val etLng = EditText(this).apply { hint = "孔口经度（例如 114.123456）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED }
+        val etAzimuth = EditText(this).apply { hint = "钻孔方位角（0-360°）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
+        val etInclination = EditText(this).apply { hint = "钻孔倾角（从水平面起算，0=水平 90=竖直）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
+        val etDepth = EditText(this).apply { hint = "孔深（米）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
+
+        // 默认填充当前坐标
+        currentLocation?.let {
+            etLat.setText("%.6f".format(it.latitude))
+            etLng.setText("%.6f".format(it.longitude))
+        }
+
+        layout.addView(etLat)
+        layout.addView(etLng)
+        layout.addView(etAzimuth)
+        layout.addView(etInclination)
+        layout.addView(etDepth)
+
+        AlertDialog.Builder(this)
+            .setTitle("钻孔计算")
+            .setView(layout)
+            .setPositiveButton("计算") { _, _ ->
+                try {
+                    val lat0 = etLat.text.toString().toDouble()
+                    val lng0 = etLng.text.toString().toDouble()
+                    val azimuth = etAzimuth.text.toString().toDouble()
+                    val inclination = etInclination.text.toString().toDouble()
+                    val depth = etDepth.text.toString().toDouble()
+
+                    if (depth <= 0 || inclination < 0 || inclination > 90) {
+                        Toast.makeText(this, "请输入有效的孔深和倾角（0-90）", Toast.LENGTH_SHORT).show()
+                        return@setPositiveButton
+                    }
+
+                    // 倾角从水平面起算：水平距离 = 孔深 * cos(倾角)
+                    // 垂直深度 = 孔深 * sin(倾角)
+                    val incRad = Math.toRadians(inclination)
+                    val horizontalDist = depth * cos(incRad)          // 水平距离（米）
+                    val verticalDepth = depth * sin(incRad)           // 垂直深度（米）
+
+                    val azRad = Math.toRadians(azimuth)
+                    val deltaE = horizontalDist * sin(azRad)          // 东向位移（米）
+                    val deltaN = horizontalDist * cos(azRad)          // 北向位移（米）
+
+                    // 近似转换为经纬度（1°纬度 ≈ 111320 m，经度随纬度变化）
+                    val deltaLat = deltaN / 111320.0
+                    val deltaLng = deltaE / (111320.0 * cos(Math.toRadians(lat0)))
+
+                    val targetLat = lat0 + deltaLat
+                    val targetLng = lng0 + deltaLng
+
+                    val result = StringBuilder()
+                    result.append("【计算结果】\n\n")
+                    result.append("孔口坐标：\n")
+                    result.append("  纬度 ").append("%.6f".format(lat0)).append("\n")
+                    result.append("  经度 ").append("%.6f".format(lng0)).append("\n\n")
+                    result.append("目标点（孔深 ").append("%.1f".format(depth)).append(" m）：\n")
+                    result.append("  垂直深度：").append("%.2f".format(verticalDepth)).append(" m\n")
+                    result.append("  水平距离：").append("%.2f".format(horizontalDist)).append(" m\n\n")
+                    result.append("目标点投影到地表的坐标：\n")
+                    result.append("  纬度 ").append("%.6f".format(targetLat)).append("\n")
+                    result.append("  经度 ").append("%.6f".format(targetLng)).append("\n\n")
+                    result.append("投影点与孔口的水平距离：\n")
+                    result.append("  ").append("%.2f".format(horizontalDist)).append(" 米")
+
+                    AlertDialog.Builder(this)
+                        .setTitle("钻孔计算结果")
+                        .setMessage(result.toString())
+                        .setPositiveButton("确定", null)
+                        .show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "输入格式错误，请检查数字", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showHistoryMainDialog() {
@@ -579,9 +683,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             saveCurrentTrackToHistory()
             stopLocationUpdates()
             Toast.makeText(this, "已停止记录轨迹", Toast.LENGTH_SHORT).show()
-        } else {
-            checkLocationPermissionAndStart()
-        }
+        } else checkLocationPermissionAndStart()
     }
 
     private fun checkLocationPermissionAndStart() {
@@ -611,7 +713,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
                 lastGoodLocation = loc
                 currentLocation = loc
-                // 异步更新地点名称
                 Thread {
                     val addr = getAddressFromLocation(loc.latitude, loc.longitude)
                     runOnUiThread {
@@ -806,7 +907,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showSatelliteInfo() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) startLocationUpdates()
+        // 点击卫星信息默认刷新定位
+        forceRefreshLocation()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            startLocationUpdates()
+        }
         registerGnssStatus()
         Handler(Looper.getMainLooper()).postDelayed({
             val view = layoutInflater.inflate(R.layout.dialog_satellite, null)
@@ -815,7 +920,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             tvSatCount.text = "当前参与定位卫星数量: " + satellitesUsed + " 颗"
             skyplot.setSatellites(satList.toList())
             AlertDialog.Builder(this).setView(view).setPositiveButton("确定", null).show()
-        }, 600)
+        }, 800)
     }
 
     private fun registerGnssStatus() {
