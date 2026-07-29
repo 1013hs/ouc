@@ -93,6 +93,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
+    private var locationManager: android.location.LocationManager? = null
+    private var nativeLocationListener: android.location.LocationListener? = null
 
     private lateinit var btnAverage: Button
     private lateinit var btnSatellite: Button
@@ -190,6 +192,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCurrentCoord.setOnClickListener { showAllTrackPointsDialog() }
         tvLatestRecord.setOnClickListener { showAllRecordsDialog() }
 
+        // 打开软件后默认开启定位（兼容鸿蒙 + 安卓）
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates()
             registerGnssStatus()
@@ -219,10 +222,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Sensor.TYPE_ACCELEROMETER -> System.arraycopy(event.values, 0, gravity, 0, 3)
             Sensor.TYPE_MAGNETIC_FIELD -> System.arraycopy(event.values, 0, geomagnetic, 0, 3)
         }
-        if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
-            val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
-            currentAttitude = att
 
+        // 兼容屏幕朝上和朝下
+        var att: Attitude? = null
+        if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
+            att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
+        } else {
+            att = AttitudeCalculator.fromGravity(gravity)
+        }
+
+        if (att != null) {
+            currentAttitude = att
             val correctedStrike = (att.strike + magneticDeclination + 360) % 360
             val correctedDipDir = (att.dipDirection + magneticDeclination + 360) % 360
 
@@ -234,38 +244,131 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    // ==================== 定位（鸿蒙 + 安卓兼容） ====================
     private fun forceRefreshLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val client = LocationServices.getFusedLocationProviderClient(this)
-        client.lastLocation.addOnSuccessListener { loc ->
-            if (loc != null) {
-                currentLocation = loc
-                updateCoordDisplay()
-                Thread {
-                    val addr = getAddressFromLocation(loc.latitude, loc.longitude)
-                    runOnUiThread {
-                        currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
-                        updateCoordDisplay()
-                    }
-                }.start()
-            }
-        }
-        val token = CancellationTokenSource()
-        client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
-            .addOnSuccessListener { loc ->
+
+        // 谷歌定位（有GMS的安卓手机）
+        try {
+            val client = LocationServices.getFusedLocationProviderClient(this)
+            client.lastLocation.addOnSuccessListener { loc ->
                 if (loc != null) {
                     currentLocation = loc
                     lastGoodLocation = loc
                     updateCoordDisplay()
-                    Thread {
-                        val addr = getAddressFromLocation(loc.latitude, loc.longitude)
-                        runOnUiThread {
-                            currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
-                            updateCoordDisplay()
-                        }
-                    }.start()
+                    updateAddressAsync(loc)
                 }
             }
+            val token = CancellationTokenSource()
+            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        currentLocation = loc
+                        lastGoodLocation = loc
+                        updateCoordDisplay()
+                        updateAddressAsync(loc)
+                    }
+                }
+        } catch (e: Exception) {
+            // 鸿蒙无GMS时忽略
+        }
+
+        // 原生定位（鸿蒙 + 安卓都可用）
+        startNativeLocation()
+    }
+
+    private fun startNativeLocation() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+
+        if (locationManager == null) {
+            locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+        }
+
+        // 先用最后已知位置快速显示
+        try {
+            val lastGps = locationManager?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            val lastNet = locationManager?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            val best = when {
+                lastGps != null && lastNet != null -> if (lastGps.time >= lastNet.time) lastGps else lastNet
+                lastGps != null -> lastGps
+                lastNet != null -> lastNet
+                else -> null
+            }
+            if (best != null) {
+                currentLocation = best
+                lastGoodLocation = best
+                updateCoordDisplay()
+                updateAddressAsync(best)
+            }
+        } catch (e: Exception) {}
+
+        if (nativeLocationListener == null) {
+            nativeLocationListener = object : android.location.LocationListener {
+                override fun onLocationChanged(loc: Location) {
+                    if (loc.accuracy > 80f) return
+                    currentLocation = loc
+                    lastGoodLocation = loc
+                    updateCoordDisplay()
+                    updateAddressAsync(loc)
+
+                    val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
+                    if (isRecordingTrack) {
+                        val last = trackPoints.lastOrNull()
+                        if (last == null || distanceBetween(last, point) > 1.5) {
+                            trackPoints.add(point)
+                        }
+                    }
+                    trackView.updateTrack(
+                        trackPoints,
+                        TrackPoint(loc.latitude, loc.longitude, loc.altitude),
+                        navTarget
+                    )
+                    if (isNavigating && navTarget != null) updateNavigationInfo()
+                }
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
+        }
+
+        try {
+            locationManager?.requestLocationUpdates(
+                android.location.LocationManager.GPS_PROVIDER,
+                800L, 1f, nativeLocationListener!!
+            )
+            locationManager?.requestLocationUpdates(
+                android.location.LocationManager.NETWORK_PROVIDER,
+                1500L, 3f, nativeLocationListener!!
+            )
+        } catch (e: Exception) {}
+    }
+
+    private fun updateAddressAsync(loc: Location) {
+        Thread {
+            val addr = getAddressFromLocation(loc.latitude, loc.longitude)
+            runOnUiThread {
+                currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
+                updateCoordDisplay()
+            }
+        }.start()
+    }
+
+    private fun startLocationUpdates() {
+        forceRefreshLocation()
+    }
+
+    private fun stopLocationUpdates() {
+        try {
+            locationCallback?.let {
+                fusedLocationClient.removeLocationUpdates(it)
+                locationCallback = null
+            }
+        } catch (e: Exception) {}
+        try {
+            nativeLocationListener?.let {
+                locationManager?.removeUpdates(it)
+            }
+        } catch (e: Exception) {}
     }
 
     private fun updateCoordDisplay() {
@@ -740,7 +843,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return uri
     }
 
-    // ===== 轨迹与高精度定位 =====
+    // ===== 轨迹 =====
     private fun toggleTrackRecording() {
         if (isRecordingTrack) {
             isRecordingTrack = false
@@ -759,50 +862,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             startLocationUpdates()
             Toast.makeText(this, "开始记录轨迹", Toast.LENGTH_SHORT).show()
         } else locationPermissionLauncher.launch(perms)
-    }
-
-    private fun startLocationUpdates() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 800)
-            .setMinUpdateIntervalMillis(400)
-            .setWaitForAccurateLocation(true)
-            .build()
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                val loc = result.lastLocation ?: return
-                if (loc.accuracy > 25f) return
-                if (lastGoodLocation != null) {
-                    val dist = lastGoodLocation!!.distanceTo(loc)
-                    val timeDiff = (loc.time - lastGoodLocation!!.time) / 1000.0
-                    if (timeDiff > 0 && dist / timeDiff > 30) return
-                }
-                lastGoodLocation = loc
-                currentLocation = loc
-                Thread {
-                    val addr = getAddressFromLocation(loc.latitude, loc.longitude)
-                    runOnUiThread {
-                        currentAddress = if (addr.isNotBlank()) addr else "地址解析中/失败"
-                        updateCoordDisplay()
-                    }
-                }.start()
-                updateCoordDisplay()
-                val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
-                if (isRecordingTrack) {
-                    val last = trackPoints.lastOrNull()
-                    if (last == null || distanceBetween(last, point) > 1.5) trackPoints.add(point)
-                }
-                trackView.updateTrack(trackPoints, currentLocation?.let { TrackPoint(it.latitude, it.longitude, it.altitude) }, navTarget)
-                if (isNavigating && navTarget != null) updateNavigationInfo()
-            }
-        }
-        fusedLocationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
-    }
-
-    private fun stopLocationUpdates() {
-        locationCallback?.let {
-            fusedLocationClient.removeLocationUpdates(it)
-            locationCallback = null
-        }
     }
 
     private fun showNavigateDialog() {
