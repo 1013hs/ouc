@@ -48,6 +48,18 @@
             android:paddingTop="2dp"
             android:paddingBottom="6dp" />
 
+        <!-- 新增：当前坐标与地点小窗口（可点击放大） -->
+        <TextView
+            android:id="@+id/tvCurrentCoord"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#F5F5F5"
+            android:padding="8dp"
+            android:textSize="12sp"
+            android:textColor="#333333"
+            android:text="坐标获取中...\n点击可查看本次所有轨迹点"
+            android:layout_marginBottom="6dp" />
+
         <Button
             android:id="@+id/btnSave"
             android:layout_width="match_parent"
@@ -122,7 +134,7 @@
                 android:layout_marginStart="4dp" />
         </LinearLayout>
 
-        <!-- 导出按钮：蓝色KML + 紫色CSV -->
+        <!-- 导出按钮 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -199,17 +211,35 @@
             android:paddingTop="2dp"
             android:textColor="#D32F2F" />
 
+        <!-- 今日保存记录（只显示最新一条，点击放大） -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="今日保存记录"
+            android:text="今日保存记录（点击查看全部）"
             android:textSize="13sp"
-            android:paddingTop="6dp"
+            android:paddingTop="8dp"
             android:paddingBottom="2dp" />
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerView"
+        <TextView
+            android:id="@+id/tvLatestRecord"
             android:layout_width="match_parent"
-            android:layout_height="300dp" />
+            android:layout_height="wrap_content"
+            android:background="#F8F8F8"
+            android:padding="10dp"
+            android:textSize="13sp"
+            android:textColor="#333333"
+            android:text="暂无记录"
+            android:minHeight="60dp" />
+
+        <!-- 版权声明 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="此软件所有版权归1037HLY所有"
+            android:textSize="11sp"
+            android:textColor="#9E9E9E"
+            android:gravity="center"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp" />
     </LinearLayout>
 </ScrollView>
