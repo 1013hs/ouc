@@ -2,175 +2,236 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:fillViewport="true"
+    android:background="#F0F4F8">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="10dp">
+        android:padding="12dp">
 
+        <!-- 标题 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="把手机背面贴在岩面上"
             android:textSize="14sp"
+            android:textColor="#546E7A"
             android:gravity="center"
-            android:paddingBottom="4dp" />
-
-        <TextView
-            android:id="@+id/tvStrike"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="走向: --°"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:gravity="center" />
-
-        <TextView
-            android:id="@+id/tvDip"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="倾角: --°"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:paddingTop="2dp" />
-
-        <TextView
-            android:id="@+id/tvDipDir"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="倾向: --°"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:paddingTop="2dp"
             android:paddingBottom="6dp" />
 
-        <!-- 当前坐标与地点小窗口 -->
+        <!-- 产状显示卡片（毛玻璃效果） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_glass_card"
+            android:padding="14dp"
+            android:layout_marginBottom="8dp"
+            android:elevation="4dp">
+
+            <TextView
+                android:id="@+id/tvStrike"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="走向: --°"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#1565C0"
+                android:gravity="center" />
+
+            <TextView
+                android:id="@+id/tvDip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="倾角: --°"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#2E7D32"
+                android:gravity="center"
+                android:paddingTop="4dp" />
+
+            <TextView
+                android:id="@+id/tvDipDir"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="倾向: --°"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#C62828"
+                android:gravity="center"
+                android:paddingTop="4dp" />
+        </LinearLayout>
+
+        <!-- 当前坐标卡片 -->
         <TextView
             android:id="@+id/tvCurrentCoord"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#F5F5F5"
-            android:padding="8dp"
+            android:background="@drawable/bg_glass_card"
+            android:padding="10dp"
             android:textSize="12sp"
-            android:textColor="#333333"
+            android:textColor="#37474F"
             android:text="坐标获取中...\n点击可查看本次所有轨迹点"
-            android:layout_marginBottom="6dp" />
+            android:layout_marginBottom="8dp"
+            android:elevation="2dp" />
 
         <Button
             android:id="@+id/btnSave"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:text="保存当前产状"
-            android:textSize="15sp" />
+            android:textSize="15sp"
+            android:backgroundTint="#1565C0"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="4dp" />
 
         <Button
             android:id="@+id/btnCamera"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:text="水印相机"
             android:textSize="15sp"
-            android:layout_marginTop="3dp" />
+            android:backgroundTint="#00838F"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="4dp" />
 
         <!-- 平均采样 + 卫星信息 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="3dp">
+            android:layout_marginBottom="4dp">
 
             <Button
                 android:id="@+id/btnAverage"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="平均采样"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                android:backgroundTint="#6A1B9A"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnSatellite"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="卫星信息"
                 android:textSize="13sp"
-                android:layout_marginStart="4dp" />
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#EF6C00"
+                android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 历史记录 + 坐标系 + 岩性 -->
+        <!-- 历史 + 坐标系 + 岩性 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="3dp">
+            android:layout_marginBottom="4dp">
 
             <Button
                 android:id="@+id/btnHistoryMain"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="历史记录"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                android:backgroundTint="#455A64"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnCoord"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="坐标系"
                 android:textSize="13sp"
-                android:layout_marginStart="4dp" />
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#5D4037"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnLithology"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="岩性"
                 android:textSize="13sp"
-                android:layout_marginStart="4dp" />
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#00695C"
+                android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 新增：钻孔计算按钮 -->
-        <Button
-            android:id="@+id/btnBorehole"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="钻孔计算"
-            android:textSize="14sp"
-            android:layout_marginTop="3dp"
-            android:backgroundTint="#FF5722"
-            android:textColor="#FFFFFF" />
-
-        <!-- 导出按钮 -->
+        <!-- 新增：磁偏角 + 投影图 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="3dp">
+            android:layout_marginBottom="4dp">
+
+            <Button
+                android:id="@+id/btnDeclination"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="磁偏角校正"
+                android:textSize="13sp"
+                android:backgroundTint="#AD1457"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/btnProjection"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="赤平/玫瑰图"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#283593"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+
+        <!-- 钻孔计算 -->
+        <Button
+            android:id="@+id/btnBorehole"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:text="钻孔计算"
+            android:textSize="14sp"
+            android:backgroundTint="#D84315"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="4dp" />
+
+        <!-- 导出 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
 
             <Button
                 android:id="@+id/btnExportKml"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="导出KML"
                 android:textSize="13sp"
-                android:backgroundTint="#1976D2"
+                android:backgroundTint="#1565C0"
                 android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnExportCsv"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="导出CSV"
                 android:textSize="13sp"
-                android:layout_marginStart="4dp"
-                android:backgroundTint="#7B1FA2"
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#6A1B9A"
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
@@ -180,37 +241,42 @@
             android:layout_height="wrap_content"
             android:text="实时轨迹预览"
             android:textSize="13sp"
-            android:paddingTop="8dp"
-            android:paddingBottom="2dp" />
+            android:textColor="#546E7A"
+            android:paddingBottom="4dp" />
 
         <com.example.rockattitude.TrackView
             android:id="@+id/trackView"
             android:layout_width="match_parent"
             android:layout_height="160dp"
-            android:background="#F0F0F0" />
+            android:background="@drawable/bg_glass_card"
+            android:elevation="2dp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingTop="4dp">
+            android:paddingTop="6dp">
 
             <Button
                 android:id="@+id/btnTrackToggle"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="开始记录轨迹"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                android:backgroundTint="#37474F"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btnNavigate"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="44dp"
                 android:layout_weight="1"
                 android:text="导航"
                 android:textSize="13sp"
-                android:layout_marginStart="4dp" />
+                android:layout_marginStart="6dp"
+                android:backgroundTint="#C62828"
+                android:textColor="#FFFFFF" />
         </LinearLayout>
 
         <TextView
@@ -219,28 +285,30 @@
             android:layout_height="wrap_content"
             android:text=""
             android:textSize="12sp"
-            android:paddingTop="2dp"
-            android:textColor="#D32F2F" />
+            android:paddingTop="4dp"
+            android:textColor="#C62828" />
 
-        <!-- 今日保存记录 -->
+        <!-- 今日记录 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="今日保存记录（点击查看全部）"
             android:textSize="13sp"
-            android:paddingTop="8dp"
-            android:paddingBottom="2dp" />
+            android:textColor="#546E7A"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp" />
 
         <TextView
             android:id="@+id/tvLatestRecord"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#F8F8F8"
-            android:padding="10dp"
+            android:background="@drawable/bg_glass_card"
+            android:padding="12dp"
             android:textSize="13sp"
-            android:textColor="#333333"
+            android:textColor="#37474F"
             android:text="暂无记录"
-            android:minHeight="60dp" />
+            android:minHeight="70dp"
+            android:elevation="2dp" />
 
         <!-- 版权 -->
         <TextView
@@ -248,9 +316,9 @@
             android:layout_height="wrap_content"
             android:text="此软件所有版权归1037HLY所有"
             android:textSize="11sp"
-            android:textColor="#9E9E9E"
+            android:textColor="#90A4AE"
             android:gravity="center"
-            android:paddingTop="16dp"
-            android:paddingBottom="8dp" />
+            android:paddingTop="18dp"
+            android:paddingBottom="10dp" />
     </LinearLayout>
 </ScrollView>
