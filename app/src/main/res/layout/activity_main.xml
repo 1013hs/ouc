@@ -48,7 +48,7 @@
             android:paddingTop="2dp"
             android:paddingBottom="6dp" />
 
-        <!-- 新增：当前坐标与地点小窗口（可点击放大） -->
+        <!-- 当前坐标与地点小窗口 -->
         <TextView
             android:id="@+id/tvCurrentCoord"
             android:layout_width="match_parent"
@@ -134,6 +134,17 @@
                 android:layout_marginStart="4dp" />
         </LinearLayout>
 
+        <!-- 新增：钻孔计算按钮 -->
+        <Button
+            android:id="@+id/btnBorehole"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="钻孔计算"
+            android:textSize="14sp"
+            android:layout_marginTop="3dp"
+            android:backgroundTint="#FF5722"
+            android:textColor="#FFFFFF" />
+
         <!-- 导出按钮 -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -211,7 +222,7 @@
             android:paddingTop="2dp"
             android:textColor="#D32F2F" />
 
-        <!-- 今日保存记录（只显示最新一条，点击放大） -->
+        <!-- 今日保存记录 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -231,7 +242,7 @@
             android:text="暂无记录"
             android:minHeight="60dp" />
 
-        <!-- 版权声明 -->
+        <!-- 版权 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
