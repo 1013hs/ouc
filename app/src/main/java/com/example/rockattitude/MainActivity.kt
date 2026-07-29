@@ -57,9 +57,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var btnSave: Button
     private lateinit var btnCamera: Button
     private lateinit var btnBorehole: Button
+    private lateinit var btnDeclination: Button
+    private lateinit var btnProjection: Button
 
     private val records = mutableListOf<Record>()
     private var currentAttitude: Attitude? = null
+    private var magneticDeclination = 0f
 
     private var photoUri: Uri? = null
     private var photoFile: File? = null
@@ -142,6 +145,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnSave = findViewById(R.id.btnSave)
         btnCamera = findViewById(R.id.btnCamera)
         btnBorehole = findViewById(R.id.btnBorehole)
+        btnDeclination = findViewById(R.id.btnDeclination)
+        btnProjection = findViewById(R.id.btnProjection)
         trackView = findViewById(R.id.trackView)
         btnTrackToggle = findViewById(R.id.btnTrackToggle)
         btnNavigate = findViewById(R.id.btnNavigate)
@@ -157,6 +162,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         records.addAll(RecordStorage.load(this))
         updateLatestRecordView()
         loadHistoryTracks()
+
+        magneticDeclination = getSharedPreferences("settings", MODE_PRIVATE).getFloat("declination", 0f)
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -177,11 +184,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnCoord.setOnClickListener { showCoordDialog() }
         btnLithology.setOnClickListener { showLithologyDialog() }
         btnBorehole.setOnClickListener { showBoreholeDialog() }
+        btnDeclination.setOnClickListener { showDeclinationDialog() }
+        btnProjection.setOnClickListener { showProjectionDialog() }
 
         tvCurrentCoord.setOnClickListener { showAllTrackPointsDialog() }
         tvLatestRecord.setOnClickListener { showAllRecordsDialog() }
 
-        // 打开软件后默认开启GPS并强制刷新定位（修复部分机型无法获取坐标）
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates()
             registerGnssStatus()
@@ -214,15 +222,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (SensorManager.getRotationMatrix(rotationMatrix, null, gravity, geomagnetic)) {
             val att = AttitudeCalculator.fromRotationMatrix(rotationMatrix)
             currentAttitude = att
-            tvStrike.text = "走向: " + "%.1f".format(att.strike) + "°"
+
+            val correctedStrike = (att.strike + magneticDeclination + 360) % 360
+            val correctedDipDir = (att.dipDirection + magneticDeclination + 360) % 360
+
+            tvStrike.text = "走向: " + "%.1f".format(correctedStrike) + "°"
             tvDip.text = "倾角: " + "%.1f".format(att.dip) + "°"
-            tvDipDir.text = "倾向: " + "%.1f".format(att.dipDirection) + "°"
+            tvDipDir.text = "倾向: " + "%.1f".format(correctedDipDir) + "°"
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    // 强制刷新定位（解决部分机型打开后无坐标问题）
     private fun forceRefreshLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         val client = LocationServices.getFusedLocationProviderClient(this)
@@ -328,16 +339,70 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         val loc = currentLocation
+        val correctedStrike = (att.strike + magneticDeclination + 360) % 360
+        val correctedDipDir = (att.dipDirection + magneticDeclination + 360) % 360
         val record = Record(
-            strike = att.strike, dip = att.dip, dipDirection = att.dipDirection,
-            time = time, note = "",
-            latitude = loc?.latitude ?: 0.0, longitude = loc?.longitude ?: 0.0,
-            altitude = loc?.altitude ?: 0.0, lithology = currentLithology
+            strike = correctedStrike,
+            dip = att.dip,
+            dipDirection = correctedDipDir,
+            time = time,
+            note = "",
+            latitude = loc?.latitude ?: 0.0,
+            longitude = loc?.longitude ?: 0.0,
+            altitude = loc?.altitude ?: 0.0,
+            lithology = currentLithology
         )
         records.add(0, record)
         RecordStorage.save(this, records)
         updateLatestRecordView()
         Toast.makeText(this, "已保存（含坐标与岩性）", Toast.LENGTH_SHORT).show()
+    }
+
+    // ==================== 磁偏角校正 ====================
+    private fun showDeclinationDialog() {
+        val et = EditText(this)
+        et.setText(magneticDeclination.toString())
+        et.hint = "东偏为正，西偏为负（例如 -5.5）"
+        et.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or
+                android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+
+        AlertDialog.Builder(this)
+            .setTitle("磁偏角校正（单位：度）")
+            .setMessage("当前磁偏角：$magneticDeclination°\n输入后实时生效，保存产状时也会使用校正后的值。")
+            .setView(et)
+            .setPositiveButton("确定") { _, _ ->
+                val value = et.text.toString().toFloatOrNull() ?: 0f
+                magneticDeclination = value
+                getSharedPreferences("settings", MODE_PRIVATE).edit().putFloat("declination", value).apply()
+                Toast.makeText(this, "磁偏角已设为 $value°", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .setNeutralButton("清零") { _, _ ->
+                magneticDeclination = 0f
+                getSharedPreferences("settings", MODE_PRIVATE).edit().putFloat("declination", 0f).apply()
+                Toast.makeText(this, "已清零", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    // ==================== 赤平投影 + 玫瑰花图 ====================
+    private fun showProjectionDialog() {
+        if (records.isEmpty()) {
+            Toast.makeText(this, "暂无产状数据，请先保存几条记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val view = RoseStereonetView(this)
+        view.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            900
+        )
+        view.setData(records)
+        AlertDialog.Builder(this)
+            .setTitle("赤平投影 + 走向玫瑰花图")
+            .setView(view)
+            .setPositiveButton("关闭", null)
+            .show()
     }
 
     // ==================== 钻孔计算 ====================
@@ -346,19 +411,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             orientation = LinearLayout.VERTICAL
             setPadding(40, 20, 40, 10)
         }
-
-        val etLat = EditText(this).apply { hint = "孔口纬度（例如 30.123456）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED }
-        val etLng = EditText(this).apply { hint = "孔口经度（例如 114.123456）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED }
-        val etAzimuth = EditText(this).apply { hint = "钻孔方位角（0-360°）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
-        val etInclination = EditText(this).apply { hint = "钻孔倾角（从水平面起算，0=水平 90=竖直）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
-        val etDepth = EditText(this).apply { hint = "孔深（米）"; inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL }
-
-        // 默认填充当前坐标
+        val etLat = EditText(this).apply {
+            hint = "孔口纬度（例如 30.123456）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+        }
+        val etLng = EditText(this).apply {
+            hint = "孔口经度（例如 114.123456）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+        }
+        val etAzimuth = EditText(this).apply {
+            hint = "钻孔方位角（0-360°）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val etInclination = EditText(this).apply {
+            hint = "钻孔倾角（从水平面起算，0=水平 90=竖直）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val etDepth = EditText(this).apply {
+            hint = "孔深（米）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
         currentLocation?.let {
             etLat.setText("%.6f".format(it.latitude))
             etLng.setText("%.6f".format(it.longitude))
         }
-
         layout.addView(etLat)
         layout.addView(etLng)
         layout.addView(etAzimuth)
@@ -375,42 +451,29 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     val azimuth = etAzimuth.text.toString().toDouble()
                     val inclination = etInclination.text.toString().toDouble()
                     val depth = etDepth.text.toString().toDouble()
-
                     if (depth <= 0 || inclination < 0 || inclination > 90) {
                         Toast.makeText(this, "请输入有效的孔深和倾角（0-90）", Toast.LENGTH_SHORT).show()
                         return@setPositiveButton
                     }
-
-                    // 倾角从水平面起算：水平距离 = 孔深 * cos(倾角)
-                    // 垂直深度 = 孔深 * sin(倾角)
                     val incRad = Math.toRadians(inclination)
-                    val horizontalDist = depth * cos(incRad)          // 水平距离（米）
-                    val verticalDepth = depth * sin(incRad)           // 垂直深度（米）
-
+                    val horizontalDist = depth * cos(incRad)
+                    val verticalDepth = depth * sin(incRad)
                     val azRad = Math.toRadians(azimuth)
-                    val deltaE = horizontalDist * sin(azRad)          // 东向位移（米）
-                    val deltaN = horizontalDist * cos(azRad)          // 北向位移（米）
-
-                    // 近似转换为经纬度（1°纬度 ≈ 111320 m，经度随纬度变化）
+                    val deltaE = horizontalDist * sin(azRad)
+                    val deltaN = horizontalDist * cos(azRad)
                     val deltaLat = deltaN / 111320.0
                     val deltaLng = deltaE / (111320.0 * cos(Math.toRadians(lat0)))
-
                     val targetLat = lat0 + deltaLat
                     val targetLng = lng0 + deltaLng
 
                     val result = StringBuilder()
                     result.append("【计算结果】\n\n")
-                    result.append("孔口坐标：\n")
-                    result.append("  纬度 ").append("%.6f".format(lat0)).append("\n")
-                    result.append("  经度 ").append("%.6f".format(lng0)).append("\n\n")
+                    result.append("孔口坐标：\n  纬度 ").append("%.6f".format(lat0)).append("\n  经度 ").append("%.6f".format(lng0)).append("\n\n")
                     result.append("目标点（孔深 ").append("%.1f".format(depth)).append(" m）：\n")
                     result.append("  垂直深度：").append("%.2f".format(verticalDepth)).append(" m\n")
                     result.append("  水平距离：").append("%.2f".format(horizontalDist)).append(" m\n\n")
-                    result.append("目标点投影到地表的坐标：\n")
-                    result.append("  纬度 ").append("%.6f".format(targetLat)).append("\n")
-                    result.append("  经度 ").append("%.6f".format(targetLng)).append("\n\n")
-                    result.append("投影点与孔口的水平距离：\n")
-                    result.append("  ").append("%.2f".format(horizontalDist)).append(" 米")
+                    result.append("目标点投影到地表的坐标：\n  纬度 ").append("%.6f".format(targetLat)).append("\n  经度 ").append("%.6f".format(targetLng)).append("\n\n")
+                    result.append("投影点与孔口的水平距离：\n  ").append("%.2f".format(horizontalDist)).append(" 米")
 
                     AlertDialog.Builder(this)
                         .setTitle("钻孔计算结果")
@@ -620,7 +683,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             if (watermarkOptions.attitude && currentAttitude != null) {
                 val a = currentAttitude!!
-                lines.add("走向: " + "%.1f".format(a.strike) + "°  倾角: " + "%.1f".format(a.dip) + "°  倾向: " + "%.1f".format(a.dipDirection) + "°")
+                val cs = (a.strike + magneticDeclination + 360) % 360
+                val cd = (a.dipDirection + magneticDeclination + 360) % 360
+                lines.add("走向: " + "%.1f".format(cs) + "°  倾角: " + "%.1f".format(a.dip) + "°  倾向: " + "%.1f".format(cd) + "°")
             }
             if (watermarkOptions.note && watermarkOptions.noteText.isNotBlank()) lines.add("备注: " + watermarkOptions.noteText)
             var y = result.height - 40f
@@ -871,7 +936,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val avgStrike = circularMean(averageSamples.map { it.strike.toDouble() })
         val avgDip = averageSamples.map { it.dip }.average().toFloat()
         val avgDipDir = circularMean(averageSamples.map { it.dipDirection.toDouble() })
-        val msg = "平均采样结果 " + averageSamples.size + " 个点：\n\n走向: " + "%.1f".format(avgStrike) + "°\n倾角: " + "%.1f".format(avgDip) + "°\n倾向: " + "%.1f".format(avgDipDir) + "°"
+        val correctedStrike = ((avgStrike + magneticDeclination) % 360 + 360) % 360
+        val correctedDipDir = ((avgDipDir + magneticDeclination) % 360 + 360) % 360
+        val msg = "平均采样结果 " + averageSamples.size + " 个点：\n\n走向: " + "%.1f".format(correctedStrike) + "°\n倾角: " + "%.1f".format(avgDip) + "°\n倾向: " + "%.1f".format(correctedDipDir) + "°"
         AlertDialog.Builder(this)
             .setTitle("平均采样完成")
             .setMessage(msg)
@@ -879,10 +946,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
                 val loc = currentLocation
                 val record = Record(
-                    strike = avgStrike.toFloat(), dip = avgDip, dipDirection = avgDipDir.toFloat(),
-                    time = time, note = "平均采样" + averageSamples.size + "点",
-                    latitude = loc?.latitude ?: 0.0, longitude = loc?.longitude ?: 0.0,
-                    altitude = loc?.altitude ?: 0.0, lithology = currentLithology
+                    strike = correctedStrike.toFloat(),
+                    dip = avgDip,
+                    dipDirection = correctedDipDir.toFloat(),
+                    time = time,
+                    note = "平均采样" + averageSamples.size + "点",
+                    latitude = loc?.latitude ?: 0.0,
+                    longitude = loc?.longitude ?: 0.0,
+                    altitude = loc?.altitude ?: 0.0,
+                    lithology = currentLithology
                 )
                 records.add(0, record)
                 RecordStorage.save(this, records)
@@ -907,7 +979,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showSatelliteInfo() {
-        // 点击卫星信息默认刷新定位
         forceRefreshLocation()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates()
