@@ -967,7 +967,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    // ==================== 历史轨迹 ====================
+    // ==================== 历史轨迹（已修复重复保存） ====================
     private fun saveCurrentTrackToHistory() {
         if (trackPoints.size < 2) return
         val day = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -1012,10 +1012,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showHistoryTrackDialog() {
-        if (trackPoints.size >= 2) {
-            saveCurrentTrackToHistory()
-        }
-
+        // 已修复：打开时不再自动保存，避免重复
         if (historyTracks.isEmpty()) {
             Toast.makeText(this, "暂无历史轨迹", Toast.LENGTH_SHORT).show()
             return
@@ -1039,7 +1036,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showTrackOptions(key: String, track: List<TrackPoint>) {
-        val options = arrayOf("在预览中显示此轨迹", "导出此轨迹为 KML", "删除此轨迹")
+        val options = arrayOf(
+            "加载到预览窗口编辑",
+            "导出此轨迹为 KML",
+            "删除此轨迹"
+        )
         AlertDialog.Builder(this)
             .setTitle(key.replace("_", " "))
             .setItems(options) { _, which ->
@@ -1048,7 +1049,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         trackPoints.clear()
                         trackPoints.addAll(track)
                         trackView.updateTrack(trackPoints, null, null)
-                        Toast.makeText(this, "已加载到预览窗口", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "已加载到预览窗口，可继续记录或导出", Toast.LENGTH_SHORT).show()
                     }
                     1 -> {
                         exportKmlWithTrack(track, key)
