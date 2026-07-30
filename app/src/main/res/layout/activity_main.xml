@@ -310,14 +310,34 @@
             android:minHeight="70dp"
             android:elevation="2dp" />
 
-        <TextView
+        <!-- 版权 + 关于按钮 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="此软件所有版权归1037HLY所有"
-            android:textSize="11sp"
-            android:textColor="#90A4AE"
+            android:orientation="horizontal"
             android:gravity="center"
-            android:paddingTop="18dp"
-            android:paddingBottom="10dp" />
+            android:paddingTop="16dp"
+            android:paddingBottom="10dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="此软件所有版权归1037YHL所有"
+                android:textSize="11sp"
+                android:textColor="#90A4AE" />
+
+            <Button
+                android:id="@+id/btnAbout"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="关于"
+                android:textSize="11sp"
+                android:textColor="#757575"
+                android:backgroundTint="#E0E0E0"
+                android:layout_marginStart="12dp"
+                android:minWidth="0dp"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>
