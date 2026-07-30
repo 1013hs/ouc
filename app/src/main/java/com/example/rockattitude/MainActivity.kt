@@ -21,6 +21,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -213,7 +214,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCurrentCoord.setOnClickListener { showAllTrackPointsDialog() }
         tvLatestRecord.setOnClickListener { showAllRecordsDialog() }
 
-        // 点击轨迹预览进入全屏
         trackView.setOnClickListener {
             SharedTrackData.points = trackPoints.toList()
             startActivity(android.content.Intent(this, TrackFullActivity::class.java))
@@ -557,44 +557,51 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     val deltaLng = deltaE / (111320.0 * cos(Math.toRadians(lat0)))
                     val targetLat = lat0 + deltaLat
                     val targetLng = lng0 + deltaLng
+
                     val result = StringBuilder()
-                    result.append("【计算结果】\n\n孔口：").append("%.6f".format(lat0)).append(", ").append("%.6f".format(lng0))
-                    result.append("\n垂直深度：").append("%.2f".format(verticalDepth)).append(" m")
-                    result.append("\n水平距离：").append("%.2f".format(horizontalDist)).append(" m")
-                    result.append("\n投影坐标：").append("%.6f".format(targetLat)).append(", ").append("%.6f".format(targetLng))
-                    AlertDialog.Builder(this).setTitle("钻孔计算结果").setMessage(result.toString()).setPositiveButton("确定", null).show()
+                    result.append("【计算结果】\n\n")
+                    result.append("孔口：").append("%.6f".format(lat0)).append(", ").append("%.6f".format(lng0)).append("\n")
+                    result.append("垂直深度：").append("%.2f".format(verticalDepth)).append(" m\n")
+                    result.append("水平距离：").append("%.2f".format(horizontalDist)).append(" m\n")
+                    result.append("投影坐标：").append("%.6f".format(targetLat)).append(", ").append("%.6f".format(targetLng))
+
+                    AlertDialog.Builder(this)
+                        .setTitle("钻孔计算结果")
+                        .setMessage(result.toString())
+                        .setPositiveButton("确定", null)
+                        .show()
                 } catch (e: Exception) {
                     Toast.makeText(this, "输入格式错误", Toast.LENGTH_SHORT).show()
                 }
             }
-            .setNeutralButton("绘制柱状图") { _, _ -> showBoreholeColumnDialog() }
+            .setNeutralButton("绘制柱状图") { _, _ ->
+                showBoreholeColumnInputDialog()
+            }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun showBoreholeColumnDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(30, 20, 30, 10)
-        }
+    private fun showBoreholeColumnInputDialog() {
         val etData = EditText(this).apply {
             hint = "每行一层：名称,起始深度,结束深度\n例：\n第四系,0,12\n砂岩,12,45\n泥岩,45,80"
-            minLines = 5
+            minLines = 6
+            setText("第四系,0,12\n砂岩,12,45\n泥岩,45,80")
         }
-        layout.addView(etData)
-        val columnView = BoreholeColumnView(this)
-        columnView.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 600)
-        layout.addView(columnView)
 
         AlertDialog.Builder(this)
-            .setTitle("简易钻孔柱状图")
-            .setView(layout)
-            .setPositiveButton("绘制") { _, _ ->
+            .setTitle("输入钻孔层位数据")
+            .setView(etData)
+            .setPositiveButton("绘制并预览") { _, _ ->
                 val lines = etData.text.toString().lines().map { it.trim() }.filter { it.isNotBlank() }
                 val colors = listOf(
-                    Color.parseColor("#FFECB3"), Color.parseColor("#FFE0B2"),
-                    Color.parseColor("#FFCCBC"), Color.parseColor("#C8E6C9"),
-                    Color.parseColor("#BBDEFB"), Color.parseColor("#D1C4E9")
+                    Color.parseColor("#FFECB3"),
+                    Color.parseColor("#FFE0B2"),
+                    Color.parseColor("#FFCCBC"),
+                    Color.parseColor("#C8E6C9"),
+                    Color.parseColor("#BBDEFB"),
+                    Color.parseColor("#D1C4E9"),
+                    Color.parseColor("#F8BBD0"),
+                    Color.parseColor("#B2EBF2")
                 )
                 val layers = mutableListOf<BoreholeColumnView.Layer>()
                 lines.forEachIndexed { i, line ->
@@ -602,14 +609,88 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     if (p.size >= 3) {
                         val name = p[0].trim()
                         val from = p[1].trim().toFloatOrNull() ?: 0f
-                        val to = p[2].trim().toFloatOrNull() ?: from + 10f
+                        val to = p[2].trim().toFloatOrNull() ?: (from + 10f)
                         layers.add(BoreholeColumnView.Layer(name, from, to, colors[i % colors.size]))
                     }
                 }
-                columnView.setLayers(layers)
+                if (layers.isEmpty()) {
+                    Toast.makeText(this, "没有解析到有效层位数据", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                showColumnPreviewDialog(layers)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showColumnPreviewDialog(layers: List<BoreholeColumnView.Layer>) {
+        val columnView = BoreholeColumnView(this)
+        columnView.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            900
+        )
+        columnView.setLayers(layers)
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 10, 20, 10)
+            addView(columnView)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("钻孔柱状图预览")
+            .setView(container)
+            .setPositiveButton("导出图片") { _, _ ->
+                val etName = EditText(this)
+                etName.setText("钻孔柱状图_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()))
+                etName.hint = "输入文件名（不含扩展名）"
+                AlertDialog.Builder(this)
+                    .setTitle("导出柱状图 - 自定义文件名")
+                    .setView(etName)
+                    .setPositiveButton("保存") { _, _ ->
+                        val name = etName.text.toString().trim().ifBlank { "钻孔柱状图" }
+                        saveColumnImage(columnView, name)
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
             }
             .setNegativeButton("关闭", null)
             .show()
+    }
+
+    private fun saveColumnImage(view: BoreholeColumnView, fileName: String) {
+        try {
+            val width = 800
+            val height = 1200
+            view.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+            )
+            view.layout(0, 0, width, height)
+
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            view.draw(canvas)
+
+            val dir = getExportDir()
+            val file = File(dir, "$fileName.png")
+            file.outputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            bitmap.recycle()
+
+            Toast.makeText(this, "柱状图已保存到 Documents/111000/$fileName.png", Toast.LENGTH_LONG).show()
+
+            val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
+            val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(share, "分享柱状图"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "保存失败: " + e.message, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showDocLibrary() {
@@ -730,7 +811,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             .setNegativeButton("关闭", null)
             .show()
-    }// ===== 水印相机（鸿蒙增强） =====
+    }// ===== 水印相机 =====
     private fun checkPermissionsAndOpenCamera() {
         val permissions = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -780,7 +861,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun processAndSaveWatermarkedPhoto(file: File) {
         Toast.makeText(this, "正在获取位置并添加水印...", Toast.LENGTH_SHORT).show()
-        // 鸿蒙优先使用已缓存的 currentLocation
         if (currentLocation != null) {
             addWatermarkAndSave(file, currentLocation)
             return
