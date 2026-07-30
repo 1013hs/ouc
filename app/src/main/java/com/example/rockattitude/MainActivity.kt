@@ -251,7 +251,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
-    
+
     override fun onResume() {
         super.onResume()
         accelerometer?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
@@ -294,9 +294,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-
-    private fun formatCoord(lat: Double, lng: Double): String {
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}private fun formatCoord(lat: Double, lng: Double): String {
         return if (CoordHelper.isLatLng(this)) {
             "纬度: " + "%.6f".format(lat) + "\n经度: " + "%.6f".format(lng)
         } else {
@@ -431,7 +429,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCurrentCoord.text = formatCoord(loc.latitude, loc.longitude) +
                 "\n海拔: $alt\n地点: $currentAddress\n（点击查看本次所有轨迹点）"
     }
-    
+
     private fun updateLatestRecordView() {
         if (records.isEmpty()) {
             tvLatestRecord.text = "暂无记录"
@@ -447,7 +445,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (r.photoPath.isNotBlank()) sb.append("【已关联照片】")
         tvLatestRecord.text = sb.toString()
     }
-
+    
     private fun showAllTrackPointsDialog() {
         if (trackPoints.isEmpty()) {
             Toast.makeText(this, "本次软件打开后暂无轨迹点", Toast.LENGTH_SHORT).show()
@@ -569,26 +567,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 版权所有：© 2026 1037YHL。保留所有权利。
 
 一、 版权声明与权力保护
-版权归属与AI辅助：本软件（包含但不限于软件程序、界面设计、图标、代码、文档及相关数据内容）之完整版权、知识产权及所有相关权益，均独家归属于制作人 1037YHL。虽然软件部分模块在研发过程中借助了AI（人工智能）技术进行辅助设计与编写，但经人工深度调试、整合与重构形成的软件整体架构与最终成果之合法权益与权属仍全部归属于制作人 1037YHL。
-原创声明与第三方组件：本软件在功能设计与交互体验上积极参考并吸收了 DGS数字填图、奥维互动地图、高德地图、两步路 等业内优秀专业软件的先进理念，但具有完全独立的知识产权，未抄袭、复制或盗用上述任何软件的源代码、底层算法或专有内容。软件在开发过程中若引用了部分开源代码、公开图标或第三方组件，其相关权益归属原作者所有，本软件对其进行了合规集成与合法调用。
-权力保护：
-未经制作人明确书面授权，任何单位、个人、企业或组织不得以任何形式（包括但不限于：复制、修改、反向工程、反编译、汇编、截取核心算法、盗用界面UI、二次打包分发等）侵犯本软件的知识产权。
-本软件仅供地质工作者、科研人员及相关专业爱好者在合法合规的前提下进行学习、研究使用。严禁用于任何形式的非法商业牟利、恶意破解或篡改。
-制作人保留依法追究一切侵权、盗版、恶意篡改及不正当竞争行为法律责任的权利。
+版权归属与AI辅助：本软件（包含但不限于软件程序、界面设计、图标、代码、文档及相关数据内容）之完整版权、知识产权及所有相关权益，均独家归属于制作人 1037YHL。虽然软件部分模块在研发过程中借助了AI技术进行辅助设计与编写，但经人工深度调试、整合与重构形成的软件整体架构与最终成果之合法权益与权属仍全部归属于制作人 1037YHL。
+原创声明与第三方组件：本软件在功能设计与交互体验上积极参考并吸收了 DGS数字填图、奥维互动地图、高德地图、两步路 等业内优秀专业软件的先进理念，但具有完全独立的知识产权，未抄袭、复制或盗用上述任何软件的源代码、底层算法或专有内容。
+权力保护：未经制作人明确书面授权，任何单位、个人不得以任何形式侵犯本软件的知识产权。本软件仅供地质工作者、科研人员及相关专业爱好者合法合规学习研究使用。
 
 二、 免责声明
-使用本软件即表示您已阅读、理解并完全同意接受本免责声明的所有条款。如果您不同意本声明的任何内容，请立即卸载并停止使用本软件。
-1. 误差问题、AI辅助与软件准确度
-AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，软件所呈现的计算结果与处理流程仅供参考。
-精度局限：受移动终端内置传感器物理局限及AI算法局限性的影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业仪器。软件计算结果不作为最终法定地质测量依据。
-2. 个人能力与使用风险自承担
-地质野外工作属于高风险特种作业。因用户自身操作不当或对软件数据产生绝对依赖而导致的一切损失，制作人 1037YHL 不承担任何法律责任。
-3. 适用范围与专业参考
-本软件主要适用于地质教学实习、普查、大面踏勘及初步调查。严禁将数据直接应用于国家重大基础设施、精密矿产储量计算等对精度有严苛要求的法定工程项目。
-4. 传感器调用、设备保护、数据安全与软件服务
-用户负有定期备份数据的责任。因野外恶劣环境导致的设备损坏或数据丢失，制作人不承担赔偿责任。
-5. 法律法规、涉密问题、测绘合规与不可抗力
-用户必须严格遵守《测绘法》《保守国家秘密法》等相关法律法规。严禁在军事禁区、保密核心区进行测量。因不可抗力导致服务中断的，制作人不承担责任。
+使用本软件即表示您已阅读、理解并完全同意接受本免责声明的所有条款。
+1. 误差问题、AI辅助与软件准确度：受移动终端传感器物理局限及AI算法局限性影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业仪器。软件计算结果不作为最终法定地质测量依据。
+2. 个人能力与使用风险自承担：地质野外工作属于高风险特种作业。因用户自身操作不当或对软件数据产生绝对依赖而导致的一切损失，制作人 1037YHL 不承担任何法律责任。
+3. 适用范围：主要适用于地质教学实习、普查、大面踏勘及初步调查。严禁将数据直接应用于国家重大基础设施、精密矿产储量计算等法定工程项目。
+4. 设备与数据安全：用户负有定期备份数据的责任。因野外恶劣环境导致的设备损坏或数据丢失，制作人不承担赔偿责任。
+5. 法律法规与测绘合规：用户必须严格遵守《测绘法》《保守国家秘密法》等相关法律法规。严禁在军事禁区、保密核心区进行测量。
 特别提示：野外地质工作，安全与严谨永远是第一位的。请结合传统地质罗盘及综合地质观察进行交叉验证。
         """.trimIndent()
         AlertDialog.Builder(this)
@@ -1176,7 +1165,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
         val brng12 = Math.toRadians(bearingBetween(a, b))
         return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
     }
-
+    
     private fun startAverageSampling() {
         if (isAveraging) {
             Toast.makeText(this, "正在采样中，请稍候", Toast.LENGTH_SHORT).show()
@@ -1233,7 +1222,72 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
                     .setMessage("是否为该平均采样点拍照？")
                     .setPositiveButton("拍照并保存") { _, _ ->
                         pendingRecord = record
- private fun getExportDir(): File {
+                        launchCameraForRecord()
+                    }
+                    .setNegativeButton("仅保存") { _, _ ->
+                        records.add(0, record)
+                        RecordStorage.save(this, records)
+                        updateLatestRecordView()
+                        Toast.makeText(this, "已保存平均结果", Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun circularMean(angles: List<Double>): Double {
+        if (angles.isEmpty()) return 0.0
+        var sumSin = 0.0
+        var sumCos = 0.0
+        for (a in angles) {
+            val rad = Math.toRadians(a)
+            sumSin += sin(rad)
+            sumCos += cos(rad)
+        }
+        val meanRad = atan2(sumSin / angles.size, sumCos / angles.size)
+        return (Math.toDegrees(meanRad) + 360) % 360
+    }
+
+    private fun showSatelliteInfo() {
+        forceRefreshLocation()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) startLocationUpdates()
+        registerGnssStatus()
+        Handler(Looper.getMainLooper()).postDelayed({
+            val view = layoutInflater.inflate(R.layout.dialog_satellite, null)
+            val tvSatCount = view.findViewById<TextView>(R.id.tvSatCount)
+            val skyplot = view.findViewById<SkyplotView>(R.id.skyplotView)
+            tvSatCount.text = "当前参与定位卫星数量: " + satellitesUsed + " 颗"
+            skyplot.setSatellites(satList.toList())
+            AlertDialog.Builder(this).setView(view).setPositiveButton("确定", null).show()
+        }, 800)
+    }
+
+    private fun registerGnssStatus() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            gnssCallback?.let { try { lm.unregisterGnssStatusCallback(it) } catch (e: Exception) {} }
+            gnssCallback = object : android.location.GnssStatus.Callback() {
+                override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
+                    satelliteCount = status.satelliteCount
+                    var used = 0
+                    satList.clear()
+                    for (i in 0 until status.satelliteCount) {
+                        val usedInFix = status.usedInFix(i)
+                        if (usedInFix) used++
+                        val az = status.getAzimuthDegrees(i)
+                        val el = status.getElevationDegrees(i)
+                        if (el >= 10) satList.add(SatInfo(az, el, usedInFix))
+                    }
+                    satellitesUsed = used
+                }
+            }
+            try { lm.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper())) } catch (e: Exception) {}
+        }
+    }
+
+    private fun getExportDir(): File {
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "111000")
         if (!dir.exists()) dir.mkdirs()
         return dir
