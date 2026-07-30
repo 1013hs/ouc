@@ -251,8 +251,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
-
-    // 由于篇幅限制，后续方法请继续粘贴第二段override fun onResume() {
+    
+    override fun onResume() {
         super.onResume()
         accelerometer?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
         magnetometer?.also { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
@@ -296,7 +296,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    // ==================== 坐标系格式化 ====================
     private fun formatCoord(lat: Double, lng: Double): String {
         return if (CoordHelper.isLatLng(this)) {
             "纬度: " + "%.6f".format(lat) + "\n经度: " + "%.6f".format(lng)
@@ -317,37 +316,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // ==================== 定位（专业级过滤 + 鸿蒙兼容） ====================
     private fun forceRefreshLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         try {
             val client = LocationServices.getFusedLocationProviderClient(this)
             client.lastLocation.addOnSuccessListener { loc ->
-                if (loc != null && loc.accuracy <= 50f) {
-                    processNewLocation(loc)
-                }
+                if (loc != null && loc.accuracy <= 50f) processNewLocation(loc)
             }
             val token = CancellationTokenSource()
             client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
-                .addOnSuccessListener { loc ->
-                    if (loc != null) processNewLocation(loc)
-                }
+                .addOnSuccessListener { loc -> if (loc != null) processNewLocation(loc) }
         } catch (e: Exception) {}
         startNativeLocation()
     }
 
     private fun processNewLocation(loc: Location) {
-        // 1. 精度过滤
         if (loc.accuracy > 30f) return
-        // 2. 时间戳过滤
         if (lastGoodLocation != null && loc.time <= lastGoodLocation!!.time) return
-        // 3. 速度跳点过滤
         if (lastGoodLocation != null) {
             val dist = lastGoodLocation!!.distanceTo(loc)
             val dt = (loc.time - lastGoodLocation!!.time) / 1000.0
             if (dt > 0 && dist / dt > 35.0) return
         }
-        // 4. 静止漂移抑制
         if (lastGoodLocation != null) {
             val speed = if (loc.hasSpeed()) loc.speed else 0f
             val dist = lastGoodLocation!!.distanceTo(loc)
@@ -358,28 +348,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 return
             }
         }
-        // 5. 指数平滑（近似卡尔曼）
         if (lastGoodLocation != null && isRecordingTrack) {
             val alpha = 0.38f
-            val smoothLat = alpha * loc.latitude + (1 - alpha) * lastGoodLocation!!.latitude
-            val smoothLng = alpha * loc.longitude + (1 - alpha) * lastGoodLocation!!.longitude
-            loc.latitude = smoothLat
-            loc.longitude = smoothLng
+            loc.latitude = alpha * loc.latitude + (1 - alpha) * lastGoodLocation!!.latitude
+            loc.longitude = alpha * loc.longitude + (1 - alpha) * lastGoodLocation!!.longitude
         }
-
         lastGoodLocation = Location(loc)
         currentLocation = loc
         updateCoordDisplay()
         updateAddressAsync(loc)
         recordAlt(loc)
-
         val point = TrackPoint(loc.latitude, loc.longitude, loc.altitude)
         if (isRecordingTrack) {
             val last = trackPoints.lastOrNull()
             val minDist = if (loc.hasSpeed() && loc.speed > 1.5f) 1.2 else 2.5
-            if (last == null || distanceBetween(last, point) > minDist) {
-                trackPoints.add(point)
-            }
+            if (last == null || distanceBetween(last, point) > minDist) trackPoints.add(point)
         }
         trackView.updateTrack(trackPoints, TrackPoint(loc.latitude, loc.longitude, loc.altitude), navTarget)
         if (isNavigating && navTarget != null) updateNavigationInfo()
@@ -395,9 +378,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun startNativeLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        if (locationManager == null) {
-            locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
-        }
+        if (locationManager == null) locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
         try {
             val lastGps = locationManager?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
             val lastNet = locationManager?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
@@ -409,12 +390,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             if (best != null) processNewLocation(best)
         } catch (e: Exception) {}
-
         if (nativeLocationListener == null) {
             nativeLocationListener = object : android.location.LocationListener {
-                override fun onLocationChanged(loc: Location) {
-                    processNewLocation(loc)
-                }
+                override fun onLocationChanged(loc: Location) { processNewLocation(loc) }
                 override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
                 override fun onProviderEnabled(provider: String) {}
                 override fun onProviderDisabled(provider: String) {}
@@ -453,7 +431,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvCurrentCoord.text = formatCoord(loc.latitude, loc.longitude) +
                 "\n海拔: $alt\n地点: $currentAddress\n（点击查看本次所有轨迹点）"
     }
-
+    
     private fun updateLatestRecordView() {
         if (records.isEmpty()) {
             tvLatestRecord.text = "暂无记录"
@@ -496,9 +474,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("全部保存记录（共" + records.size + "条）")
-            .setItems(items) { _, which ->
-                showRecordDetail(records[which])
-            }
+            .setItems(items) { _, which -> showRecordDetail(records[which]) }
             .setPositiveButton("关闭", null)
             .show()
     }
@@ -513,7 +489,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (r.altitude != 0.0) sb.append("海拔: ").append("%.1f".format(r.altitude)).append(" m\n")
         if (r.lithology.isNotBlank()) sb.append("岩性: ").append(r.lithology).append("\n")
         if (r.note.isNotBlank()) sb.append("备注: ").append(r.note).append("\n")
-
         val builder = AlertDialog.Builder(this).setTitle("产状详情").setMessage(sb.toString())
         if (r.photoPath.isNotBlank() && File(r.photoPath).exists()) {
             builder.setPositiveButton("查看照片") { _, _ ->
@@ -535,7 +510,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         builder.show()
     }
 
-    // ==================== 保存产状（可选拍照） ====================
     private fun saveCurrent() {
         val att = currentAttitude ?: run {
             Toast.makeText(this, "请先把手机背面贴在岩面上", Toast.LENGTH_SHORT).show()
@@ -585,7 +559,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // ==================== 关于 ====================
     private fun showAboutDialog() {
         val msg = """
 岩层产状测量软件 (Rock Attitude) - 版权声明与免责声明
@@ -607,25 +580,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 使用本软件即表示您已阅读、理解并完全同意接受本免责声明的所有条款。如果您不同意本声明的任何内容，请立即卸载并停止使用本软件。
 1. 误差问题、AI辅助与软件准确度
 AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，软件所呈现的计算结果与处理流程仅供参考。
-精度局限：受移动终端内置传感器（磁力计、加速度计、陀螺仪等）物理局限、硬件制造工艺、周围电磁环境干扰及AI算法局限性的影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业地质勘测仪器。精确数据请务必参考专业测量设备。
-软件计算结果不作为最终的法定地质测量依据、工程设计参数或司法鉴定时效凭证。
+精度局限：受移动终端内置传感器物理局限及AI算法局限性的影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业仪器。软件计算结果不作为最终法定地质测量依据。
 2. 个人能力与使用风险自承担
-地质野外工作属于高风险特种作业（涉及悬崖攀爬、恶劣天气、野生动物、落石、滑坡等自然危险）。用户在使用本软件时，必须具备相应专业的地质野外作业资质、安全防范意识与独立判断能力。
-风险自承担：因用户自身操作不当、对软件测量数据（含AI辅助计算结果）产生绝对依赖、或未能结合实际地质情况进行综合研判而导致的一切直接或间接损失（包括但不限于人身伤亡、财产损失、项目延误、工程质量事故等），制作人 1037YHL 不承担任何法律责任。
+地质野外工作属于高风险特种作业。因用户自身操作不当或对软件数据产生绝对依赖而导致的一切损失，制作人 1037YHL 不承担任何法律责任。
 3. 适用范围与专业参考
-本软件参考了 DGS数字填图、奥维互动地图、高德地图、两步路 等国内外优秀专业软件的设计规范与交互优点，旨在提升野外地质数据采集的便捷性。
-软件主要适用于地质教学实习、普查、地质大面踏勘及初步调查。严禁将本软件的数据直接应用于国家重大基础设施建设、精密矿产储量计算、地质灾害精准评估等对精度有严苛要求的法定工程项目中。
+本软件主要适用于地质教学实习、普查、大面踏勘及初步调查。严禁将数据直接应用于国家重大基础设施、精密矿产储量计算等对精度有严苛要求的法定工程项目。
 4. 传感器调用、设备保护、数据安全与软件服务
-本软件在运行过程中需要调用移动设备的摄像头、GPS/北斗定位、陀螺仪、磁力计、存储空间等系统权限。
-设备与数据安全：用户在野外极端环境（如强磁场区、雷雨天气、高湿高温、严寒或极端跌落风险场景）使用手机时，请自行做好设备的物理防护。用户在使用本软件进行数据采集、记录及导出时，负有定期备份的责任。因野外恶劣环境导致的手机硬件损坏、或因设备故障、系统崩溃、电池耗尽、误操作及未及时导出导致的数据丢失，制作人不承担数据恢复或赔偿责任。
-软件服务与更新：本软件依“现状”及“可获得”之基础向用户提供。制作人不保证软件在所有型号的移动设备上均能无缝运行，亦不承诺永久提供版本更新、维护或技术支持服务。因操作系统升级、手机硬件迭代导致软件无法正常运行或部分功能失效的，制作人不承担技术补偿或赔偿责任。
+用户负有定期备份数据的责任。因野外恶劣环境导致的设备损坏或数据丢失，制作人不承担赔偿责任。
 5. 法律法规、涉密问题、测绘合规与不可抗力
-测绘合规声明：用户在使用本软件进行坐标定位、地理信息采集与处理时，必须严格遵守国家关于测绘地理信息及相关法律法规，不得擅自测绘、非法采集或发布未经国家主管部门批准的法定地理信息成果数据。
-合规与涉密红线：用户在使用本软件采集、记录、存储及导出地理空间与地质数据时，必须严格遵守中华人民共和国相关法律法规，包括但不限于《中华人民共和国测绘法》、《中华人民共和国保守国家秘密法》以及数据安全、地理信息安全等相关条例。严禁在国家军事禁区、保密核心区、国防工程周边及涉及国家秘密的敏感地理区域使用本软件进行测量、定位或地理数据采集。任何因用户违规测绘、非法采集涉密地理信息或违规外传数据而触犯国家法律法规所引发的一切刑事、民事及行政法律责任，均由用户个人全部承担，与软件制作人无关。
-不可抗力：因不可抗力（包括但不限于自然灾害、战争、罢工、政府行为、电信运营商网络故障、黑客攻击、基础软硬件环境突发故障等无法预见、不能克服并不能避免的客观情况）导致本软件服务中断、运行异常、数据损毁或无法正常使用的，制作人不承担相应的法律责任。
-特别提示：野外地质工作，安全与严谨永远是第一位的。请结合传统地质罗盘及综合地质观察进行交叉验证，确保作业安全与数据准确。
+用户必须严格遵守《测绘法》《保守国家秘密法》等相关法律法规。严禁在军事禁区、保密核心区进行测量。因不可抗力导致服务中断的，制作人不承担责任。
+特别提示：野外地质工作，安全与严谨永远是第一位的。请结合传统地质罗盘及综合地质观察进行交叉验证。
         """.trimIndent()
-
         AlertDialog.Builder(this)
             .setTitle("关于 / 版权与免责声明")
             .setMessage(msg)
@@ -702,7 +667,6 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
         layout.addView(etAzimuth)
         layout.addView(etInclination)
         layout.addView(etDepth)
-
         AlertDialog.Builder(this)
             .setTitle("钻孔计算")
             .setView(layout)
@@ -823,9 +787,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
             view.draw(canvas)
             val dir = getExportDir()
             val file = File(dir, "$fileName.png")
-            file.outputStream().use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
+            file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
             bitmap.recycle()
             Toast.makeText(this, "柱状图已保存到 Documents/111000/$fileName.png", Toast.LENGTH_LONG).show()
             val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
@@ -839,7 +801,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
             Toast.makeText(this, "保存失败: " + e.message, Toast.LENGTH_LONG).show()
         }
     }
-
+    
     private fun showDocLibrary() {
         val files = DocStorage.list(this)
         val items = files.map { it.name }.toTypedArray()
@@ -852,9 +814,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
                     setDataAndType(uri, contentResolver.getType(uri) ?: "*/*")
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                try {
-                    startActivity(intent)
-                } catch (e: Exception) {
+                try { startActivity(intent) } catch (e: Exception) {
                     Toast.makeText(this, "无法打开，请安装WPS或Office", Toast.LENGTH_LONG).show()
                 }
             }
@@ -962,7 +922,6 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
             .show()
     }
 
-    // ==================== 水印相机 ====================
     private fun checkPermissionsAndOpenCamera() {
         val permissions = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -1035,9 +994,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
             val lines = mutableListOf<String>()
             if (watermarkOptions.time) lines.add("时间: " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
             if (location != null) {
-                if (watermarkOptions.latLng) {
-                    lines.add(formatCoordOneLine(location.latitude, location.longitude))
-                }
+                if (watermarkOptions.latLng) lines.add(formatCoordOneLine(location.latitude, location.longitude))
                 if (watermarkOptions.altitude) lines.add(if (location.hasAltitude()) "海拔: " + "%.1f".format(location.altitude) + " m" else "海拔: 无数据")
                 if (watermarkOptions.address) {
                     val addr = getAddressFromLocation(location.latitude, location.longitude)
@@ -1276,72 +1233,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
                     .setMessage("是否为该平均采样点拍照？")
                     .setPositiveButton("拍照并保存") { _, _ ->
                         pendingRecord = record
-                        launchCameraForRecord()
-                    }
-                    .setNegativeButton("仅保存") { _, _ ->
-                        records.add(0, record)
-                        RecordStorage.save(this, records)
-                        updateLatestRecordView()
-                        Toast.makeText(this, "已保存平均结果", Toast.LENGTH_SHORT).show()
-                    }
-                    .show()
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun circularMean(angles: List<Double>): Double {
-        if (angles.isEmpty()) return 0.0
-        var sumSin = 0.0
-        var sumCos = 0.0
-        for (a in angles) {
-            val rad = Math.toRadians(a)
-            sumSin += sin(rad)
-            sumCos += cos(rad)
-        }
-        val meanRad = atan2(sumSin / angles.size, sumCos / angles.size)
-        return (Math.toDegrees(meanRad) + 360) % 360
-    }
-
-    private fun showSatelliteInfo() {
-        forceRefreshLocation()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) startLocationUpdates()
-        registerGnssStatus()
-        Handler(Looper.getMainLooper()).postDelayed({
-            val view = layoutInflater.inflate(R.layout.dialog_satellite, null)
-            val tvSatCount = view.findViewById<TextView>(R.id.tvSatCount)
-            val skyplot = view.findViewById<SkyplotView>(R.id.skyplotView)
-            tvSatCount.text = "当前参与定位卫星数量: " + satellitesUsed + " 颗"
-            skyplot.setSatellites(satList.toList())
-            AlertDialog.Builder(this).setView(view).setPositiveButton("确定", null).show()
-        }, 800)
-    }
-
-    private fun registerGnssStatus() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            gnssCallback?.let { try { lm.unregisterGnssStatusCallback(it) } catch (e: Exception) {} }
-            gnssCallback = object : android.location.GnssStatus.Callback() {
-                override fun onSatelliteStatusChanged(status: android.location.GnssStatus) {
-                    satelliteCount = status.satelliteCount
-                    var used = 0
-                    satList.clear()
-                    for (i in 0 until status.satelliteCount) {
-                        val usedInFix = status.usedInFix(i)
-                        if (usedInFix) used++
-                        val az = status.getAzimuthDegrees(i)
-                        val el = status.getElevationDegrees(i)
-                        if (el >= 10) satList.add(SatInfo(az, el, usedInFix))
-                    }
-                    satellitesUsed = used
-                }
-            }
-            try { lm.registerGnssStatusCallback(gnssCallback!!, Handler(Looper.getMainLooper())) } catch (e: Exception) {}
-        }
-    }
-
-    private fun getExportDir(): File {
+ private fun getExportDir(): File {
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "111000")
         if (!dir.exists()) dir.mkdirs()
         return dir
@@ -1414,7 +1306,7 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
         try {
             val isLatLng = CoordHelper.isLatLng(this)
             val sb = StringBuilder()
-            sb.append("\uFEFF")   // UTF-8 BOM，解决Excel中文乱码
+            sb.append("\uFEFF")
             if (isLatLng) {
                 sb.append("测点日期,纬度,经度,海拔(m),走向,倾角,倾向,岩性,备注\n")
             } else {
@@ -1565,4 +1457,4 @@ AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，�
             .setNegativeButton("取消", null)
             .show()
     }
-}
+                    }
