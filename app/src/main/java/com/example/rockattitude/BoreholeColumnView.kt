@@ -35,6 +35,7 @@ class BoreholeColumnView @JvmOverloads constructor(
             canvas.drawText("暂无层位数据", 40f, 80f, paintText)
             return
         }
+
         val maxDepth = layers.maxOf { it.to }.coerceAtLeast(1f)
         val left = 80f
         val right = width - 40f
@@ -48,12 +49,13 @@ class BoreholeColumnView @JvmOverloads constructor(
             paintFill.color = layer.color
             canvas.drawRect(left, y1, right, y2, paintFill)
             canvas.drawRect(left, y1, right, y2, paintLine)
-            canvas.drawText(
-                "${layer.name} \( {layer.from.toInt()}- \){layer.to.toInt()}m",
-                left + 12f, (y1 + y2) / 2 + 10f, paintText
-            )
+
+            // 使用字符串拼接，避免任何转义问题
+            val label = layer.name + " " + layer.from.toInt() + "-" + layer.to.toInt() + "m"
+            canvas.drawText(label, left + 12f, (y1 + y2) / 2 + 10f, paintText)
         }
+
         canvas.drawText("0m", 10f, top + 10f, paintText)
-        canvas.drawText("${maxDepth.toInt()}m", 10f, bottom, paintText)
+        canvas.drawText(maxDepth.toInt().toString() + "m", 10f, bottom, paintText)
     }
 }
