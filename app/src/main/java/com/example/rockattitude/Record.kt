@@ -9,5 +9,6 @@ data class Record(
     var latitude: Double = 0.0,
     var longitude: Double = 0.0,
     var altitude: Double = 0.0,
-    var lithology: String = ""          // 岩性
+    var lithology: String = "",
+    var photoPath: String = ""          // 对应测点照片路径
 )
