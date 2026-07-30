@@ -11,7 +11,6 @@
         android:orientation="vertical"
         android:padding="12dp">
 
-        <!-- 标题 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -21,7 +20,6 @@
             android:gravity="center"
             android:paddingBottom="6dp" />
 
-        <!-- 产状显示卡片（毛玻璃效果） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -64,7 +62,6 @@
                 android:paddingTop="4dp" />
         </LinearLayout>
 
-        <!-- 当前坐标卡片 -->
         <TextView
             android:id="@+id/tvCurrentCoord"
             android:layout_width="match_parent"
@@ -97,7 +94,6 @@
             android:textColor="#FFFFFF"
             android:layout_marginBottom="4dp" />
 
-        <!-- 平均采样 + 卫星信息 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -126,7 +122,6 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 历史 + 坐标系 + 岩性 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -166,7 +161,6 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 新增：磁偏角 + 投影图 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -195,7 +189,6 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 钻孔计算 -->
         <Button
             android:id="@+id/btnBorehole"
             android:layout_width="match_parent"
@@ -206,7 +199,16 @@
             android:textColor="#FFFFFF"
             android:layout_marginBottom="4dp" />
 
-        <!-- 导出 -->
+        <Button
+            android:id="@+id/btnDocs"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:text="离线文档库"
+            android:textSize="14sp"
+            android:backgroundTint="#455A64"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="4dp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -235,11 +237,10 @@
                 android:textColor="#FFFFFF" />
         </LinearLayout>
 
-        <!-- 轨迹预览 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="实时轨迹预览"
+            android:text="实时轨迹预览（点击进入全屏）"
             android:textSize="13sp"
             android:textColor="#546E7A"
             android:paddingBottom="4dp" />
@@ -288,7 +289,6 @@
             android:paddingTop="4dp"
             android:textColor="#C62828" />
 
-        <!-- 今日记录 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -310,7 +310,6 @@
             android:minHeight="70dp"
             android:elevation="2dp" />
 
-        <!-- 版权 -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
