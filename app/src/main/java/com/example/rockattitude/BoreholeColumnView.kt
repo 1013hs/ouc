@@ -22,6 +22,10 @@ class BoreholeColumnView @JvmOverloads constructor(
         strokeWidth = 2f
         style = Paint.Style.STROKE
     }
+    private val paintBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
 
     fun setLayers(list: List<Layer>) {
         layers.clear()
@@ -29,8 +33,13 @@ class BoreholeColumnView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun getLayers(): List<Layer> = layers.toList()
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // 白底，方便导出
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paintBg)
+
         if (layers.isEmpty()) {
             canvas.drawText("暂无层位数据", 40f, 80f, paintText)
             return
@@ -50,7 +59,6 @@ class BoreholeColumnView @JvmOverloads constructor(
             canvas.drawRect(left, y1, right, y2, paintFill)
             canvas.drawRect(left, y1, right, y2, paintLine)
 
-            // 使用字符串拼接，避免任何转义问题
             val label = layer.name + " " + layer.from.toInt() + "-" + layer.to.toInt() + "m"
             canvas.drawText(label, left + 12f, (y1 + y2) / 2 + 10f, paintText)
         }
