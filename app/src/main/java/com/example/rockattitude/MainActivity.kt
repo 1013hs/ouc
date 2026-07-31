@@ -26,6 +26,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -176,7 +177,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "添加失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
-
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -294,13 +295,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}private fun formatCoord(lat: Double, lng: Double): String {
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    private fun formatCoord(lat: Double, lng: Double): String {
         return if (CoordHelper.isLatLng(this)) {
             "纬度: " + "%.6f".format(lat) + "\n经度: " + "%.6f".format(lng)
         } else {
             val zone = CoordHelper.getZone(this)
-            val (n, e) = CoordHelper.toGaussKruger(lat, lng, zone)
-            "北向: " + "%.2f".format(n) + " m\n东向: " + "%.2f".format(e) + " m\n带号: $zone"
+            val (x, y) = CoordHelper.toGaussKruger(lat, lng, zone)
+            "北向X: " + "%.0f".format(x) + " m\n东向Y: " + "%.0f".format(y) + " m\n带号: " + zone + "（3度带）"
         }
     }
 
@@ -309,11 +312,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             "%.6f".format(lat) + ", " + "%.6f".format(lng)
         } else {
             val zone = CoordHelper.getZone(this)
-            val (n, e) = CoordHelper.toGaussKruger(lat, lng, zone)
-            "N" + "%.1f".format(n) + " E" + "%.1f".format(e) + " (带" + zone + ")"
+            val (x, y) = CoordHelper.toGaussKruger(lat, lng, zone)
+            "X" + "%.0f".format(x) + " Y" + "%.0f".format(y) + " (带" + zone + ")"
         }
     }
-
+    
     private fun forceRefreshLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         try {
@@ -427,7 +430,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         val alt = if (loc.hasAltitude()) "%.1f".format(loc.altitude) + " m" else "无"
         tvCurrentCoord.text = formatCoord(loc.latitude, loc.longitude) +
-                "\n海拔: $alt\n地点: $currentAddress\n（点击查看本次所有轨迹点）"
+                "\n海拔: $alt（1985国家高程基准）\n地点: $currentAddress\n（点击查看本次所有轨迹点）"
     }
 
     private fun updateLatestRecordView() {
@@ -445,7 +448,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (r.photoPath.isNotBlank()) sb.append("【已关联照片】")
         tvLatestRecord.text = sb.toString()
     }
-    
+
     private fun showAllTrackPointsDialog() {
         if (trackPoints.isEmpty()) {
             Toast.makeText(this, "本次软件打开后暂无轨迹点", Toast.LENGTH_SHORT).show()
@@ -558,31 +561,51 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showAboutDialog() {
-        val msg = """
-岩层产状测量软件 (Rock Attitude) - 版权声明与免责声明
-
+        val fullText = """岩层产状测量软件 (Rock Attitude) - 版权声明与免责声明
 软件名称：岩层产状测量 (Rock Attitude)
 当前版本：V6.15
 制作人：1037YHL
 版权所有：© 2026 1037YHL。保留所有权利。
-
 一、 版权声明与权力保护
-版权归属与AI辅助：本软件（包含但不限于软件程序、界面设计、图标、代码、文档及相关数据内容）之完整版权、知识产权及所有相关权益，均独家归属于制作人 1037YHL。虽然软件部分模块在研发过程中借助了AI技术进行辅助设计与编写，但经人工深度调试、整合与重构形成的软件整体架构与最终成果之合法权益与权属仍全部归属于制作人 1037YHL。
-原创声明与第三方组件：本软件在功能设计与交互体验上积极参考并吸收了 DGS数字填图、奥维互动地图、高德地图、两步路 等业内优秀专业软件的先进理念，但具有完全独立的知识产权，未抄袭、复制或盗用上述任何软件的源代码、底层算法或专有内容。
-权力保护：未经制作人明确书面授权，任何单位、个人不得以任何形式侵犯本软件的知识产权。本软件仅供地质工作者、科研人员及相关专业爱好者合法合规学习研究使用。
-
+版权归属与AI辅助：本软件（包含但不限于软件程序、界面设计、图标、代码、文档及相关数据内容）之完整版权、知识产权及所有相关权益，均独家归属于制作人 1037YHL。虽然软件部分模块在研发过程中借助了AI（人工智能）技术进行辅助设计与编写，但经人工深度调试、整合与重构形成的软件整体架构与最终成果之合法权益与权属仍全部归属于制作人 1037YHL。
+原创声明与第三方组件：本软件在功能设计与交互体验上积极参考并吸收了 DGS数字填图、奥维互动地图、高德地图、两步路 等业内优秀专业软件的先进理念，但具有完全独立的知识产权，未抄袭、复制或盗用上述任何软件的源代码、底层算法或专有内容。软件在开发过程中若引用了部分开源代码、公开图标或第三方组件，其相关权益归属原作者所有，本软件对其进行了合规集成与合法调用。
+权力保护：
+未经制作人明确书面授权，任何单位、个人、企业或组织不得以任何形式（包括但不限于：复制、修改、反向工程、反编译、汇编、截取核心算法、盗用界面UI、二次打包分发等）侵犯本软件的知识产权。
+本软件仅供地质工作者、科研人员及相关专业爱好者在合法合规的前提下进行学习、研究使用。严禁用于任何形式的非法商业牟利、恶意破解或篡改。
+制作人保留依法追究一切侵权、盗版、恶意篡改及不正当竞争行为法律责任的权利。
 二、 免责声明
-使用本软件即表示您已阅读、理解并完全同意接受本免责声明的所有条款。
-1. 误差问题、AI辅助与软件准确度：受移动终端传感器物理局限及AI算法局限性影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业仪器。软件计算结果不作为最终法定地质测量依据。
-2. 个人能力与使用风险自承担：地质野外工作属于高风险特种作业。因用户自身操作不当或对软件数据产生绝对依赖而导致的一切损失，制作人 1037YHL 不承担任何法律责任。
-3. 适用范围：主要适用于地质教学实习、普查、大面踏勘及初步调查。严禁将数据直接应用于国家重大基础设施、精密矿产储量计算等法定工程项目。
-4. 设备与数据安全：用户负有定期备份数据的责任。因野外恶劣环境导致的设备损坏或数据丢失，制作人不承担赔偿责任。
-5. 法律法规与测绘合规：用户必须严格遵守《测绘法》《保守国家秘密法》等相关法律法规。严禁在军事禁区、保密核心区进行测量。
-特别提示：野外地质工作，安全与严谨永远是第一位的。请结合传统地质罗盘及综合地质观察进行交叉验证。
-        """.trimIndent()
+使用本软件即表示您已阅读、理解并完全同意接受本免责声明的所有条款。如果您不同意本声明的任何内容，请立即卸载并停止使用本软件。
+1. 误差问题、AI辅助与软件准确度
+AI辅助说明：本软件部分功能及代码逻辑由AI技术辅助生成，软件所呈现的计算结果与处理流程仅供参考。
+精度局限：受移动终端内置传感器（磁力计、加速度计、陀螺仪等）物理局限、硬件制造工艺、周围电磁环境干扰及AI算法局限性的影响，测量结果无法替代传统地质罗盘、全站仪、高精度RTK等专业地质勘测仪器。精确数据请务必参考专业测量设备。
+软件计算结果不作为最终的法定地质测量依据、工程设计参数或司法鉴定时效凭证。
+2. 个人能力与使用风险自承担
+地质野外工作属于高风险特种作业（涉及悬崖攀爬、恶劣天气、野生动物、落石、滑坡等自然危险）。用户在使用本软件时，必须具备相应专业的地质野外作业资质、安全防范意识与独立判断能力。
+风险自承担：因用户自身操作不当、对软件测量数据（含AI辅助计算结果）产生绝对依赖、或未能结合实际地质情况进行综合研判而导致的一切直接或间接损失（包括但不限于人身伤亡、财产损失、项目延误、工程质量事故等），制作人 1037YHL 不承担任何法律责任。
+3. 适用范围与专业参考
+本软件参考了 DGS数字填图、奥维互动地图、高德地图、两步路 等国内外优秀专业软件的设计规范与交互优点，旨在提升野外地质数据采集的便捷性。
+软件主要适用于地质教学实习、普查、地质大面踏勘及初步调查。严禁将本软件的数据直接应用于国家重大基础设施建设、精密矿产储量计算、地质灾害精准评估等对精度有严苛要求的法定工程项目中。
+4. 传感器调用、设备保护、数据安全与软件服务
+本软件在运行过程中需要调用移动设备的摄像头、GPS/北斗定位、陀螺仪、磁力计、存储空间等系统权限。
+设备与数据安全：用户在野外极端环境（如强磁场区、雷雨天气、高湿高温、严寒或极端跌落风险场景）使用手机时，请自行做好设备的物理防护。用户在使用本软件进行数据采集、记录及导出时，负有定期备份的责任。因野外恶劣环境导致的手机硬件损坏、或因设备故障、系统崩溃、电池耗尽、误操作及未及时导出导致的数据丢失，制作人不承担数据恢复或赔偿责任。
+软件服务与更新：本软件依“现状”及“可获得”之基础向用户提供。制作人不保证软件在所有型号的移动设备上均能无缝运行，亦不承诺永久提供版本更新、维护或技术支持服务。因操作系统升级、手机硬件迭代导致软件无法正常运行或部分功能失效的，制作人不承担技术补偿或赔偿责任。
+5. 法律法规、涉密问题、测绘合规与不可抗力
+测绘合规声明：用户在使用本软件进行坐标定位、地理信息采集与处理时，必须严格遵守国家关于测绘地理信息及相关法律法规，不得擅自测绘、非法采集或发布未经国家主管部门批准的法定地理信息成果数据。
+合规与涉密红线：用户在使用本软件采集、记录、存储及导出地理空间与地质数据时，必须严格遵守中华人民共和国相关法律法规，包括但不限于《中华人民共和国测绘法》、《中华人民共和国保守国家秘密法》以及数据安全、地理信息安全等相关条例。严禁在国家军事禁区、保密核心区、国防工程周边及涉及国家秘密的敏感地理区域使用本软件进行测量、定位或地理数据采集。任何因用户违规测绘、非法采集涉密地理信息或违规外传数据而触犯国家法律法规所引发的一切刑事、民事及行政法律责任，均由用户个人全部承担，与软件制作人无关。
+不可抗力：因不可抗力（包括但不限于自然灾害、战争、罢工、政府行为、电信运营商网络故障、黑客攻击、基础软硬件环境突发故障等无法预见、不能克服并不能避免的客观情况）导致本软件服务中断、运行异常、数据损毁或无法正常使用的，制作人不承担相应的法律责任。
+特别提示：野外地质工作，安全与严谨永远是第一位的。请结合传统地质罗盘及综合地质观察进行交叉验证，确保作业安全与数据准确。"""
+
+        val scroll = ScrollView(this)
+        val tv = TextView(this).apply {
+            text = fullText
+            textSize = 13f
+            setPadding(40, 30, 40, 30)
+            setTextIsSelectable(true)
+        }
+        scroll.addView(tv)
         AlertDialog.Builder(this)
-            .setTitle("关于 / 版权与免责声明")
-            .setMessage(msg)
+            .setTitle("关于")
+            .setView(scroll)
             .setPositiveButton("我已阅读并同意", null)
             .show()
     }
@@ -620,6 +643,54 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         view.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 900)
         view.setData(records)
         AlertDialog.Builder(this).setTitle("赤平投影 + 走向玫瑰花图").setView(view).setPositiveButton("关闭", null).show()
+    }
+
+    private fun showCoordDialog() {
+        val isLatLng = CoordHelper.isLatLng(this)
+        val zone = CoordHelper.getZone(this)
+        val datum = CoordHelper.getDatum(this)
+        val options = arrayOf(
+            "当前: " + if (isLatLng) "经纬度 ($datum)" else "公里网 带号$zone ($datum)",
+            "切换为经纬度（CGCS2000大地基准）",
+            "切换为高斯-克吕格公里网（可改带号）",
+            "修改带号（当前 $zone）",
+            "高程基准：1985国家高程基准（固定）"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("坐标系选择")
+            .setItems(options) { _, which ->
+                when (which) {
+                    1 -> {
+                        CoordHelper.setMode(this, true)
+                        CoordHelper.setDatum(this, "CGCS2000")
+                        updateCoordDisplay()
+                        Toast.makeText(this, "已切换为经纬度（CGCS2000）", Toast.LENGTH_SHORT).show()
+                    }
+                    2, 3 -> {
+                        val et = EditText(this)
+                        et.setText(zone.toString())
+                        et.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                        et.hint = "输入3度带带号（如四川宁南约34）"
+                        AlertDialog.Builder(this)
+                            .setTitle("输入带号（3度带）")
+                            .setMessage("请输入当前坐标系带号")
+                            .setView(et)
+                            .setPositiveButton("确定") { _, _ ->
+                                val z = et.text.toString().toIntOrNull() ?: 34
+                                CoordHelper.setZone(this, z)
+                                CoordHelper.setMode(this, false)
+                                CoordHelper.setDatum(this, "CGCS2000")
+                                updateCoordDisplay()
+                                Toast.makeText(this, "已切换为公里网，带号 $z", Toast.LENGTH_SHORT).show()
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                    4 -> Toast.makeText(this, "高程基准已固定为1985国家高程基准", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     private fun showBoreholeDialog() {
@@ -790,7 +861,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             Toast.makeText(this, "保存失败: " + e.message, Toast.LENGTH_LONG).show()
         }
     }
-    
+
     private fun showDocLibrary() {
         val files = DocStorage.list(this)
         val items = files.map { it.name }.toTypedArray()
@@ -820,46 +891,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 when (which) {
                     0 -> showHistoryDialog()
                     1 -> showHistoryTrackDialog()
-                }
-            }
-            .setNegativeButton("关闭", null)
-            .show()
-    }
-
-    private fun showCoordDialog() {
-        val isLatLng = CoordHelper.isLatLng(this)
-        val zone = CoordHelper.getZone(this)
-        val options = arrayOf(
-            "当前: " + if (isLatLng) "经纬度" else "公里网（带号 $zone）",
-            "切换为经纬度",
-            "切换为公里网并修改带号"
-        )
-        AlertDialog.Builder(this)
-            .setTitle("坐标显示方式")
-            .setItems(options) { _, which ->
-                when (which) {
-                    1 -> {
-                        CoordHelper.setMode(this, true)
-                        updateCoordDisplay()
-                        Toast.makeText(this, "已切换为经纬度", Toast.LENGTH_SHORT).show()
-                    }
-                    2 -> {
-                        val et = EditText(this)
-                        et.setText(zone.toString())
-                        et.inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                        AlertDialog.Builder(this)
-                            .setTitle("输入带号")
-                            .setView(et)
-                            .setPositiveButton("确定") { _, _ ->
-                                val z = et.text.toString().toIntOrNull() ?: 50
-                                CoordHelper.setZone(this, z)
-                                CoordHelper.setMode(this, false)
-                                updateCoordDisplay()
-                                Toast.makeText(this, "已切换为公里网，带号 $z", Toast.LENGTH_SHORT).show()
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
                 }
             }
             .setNegativeButton("关闭", null)
@@ -1165,7 +1196,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val brng12 = Math.toRadians(bearingBetween(a, b))
         return asin(sin(d13) * sin(brng13 - brng12)) * 6371000.0
     }
-    
+
     private fun startAverageSampling() {
         if (isAveraging) {
             Toast.makeText(this, "正在采样中，请稍候", Toast.LENGTH_SHORT).show()
@@ -1364,7 +1395,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             if (isLatLng) {
                 sb.append("测点日期,纬度,经度,海拔(m),走向,倾角,倾向,岩性,备注\n")
             } else {
-                sb.append("测点日期,北向(m),东向(m),海拔(m),走向,倾角,倾向,岩性,备注\n")
+                sb.append("测点日期,北向X(m),东向Y(m),海拔(m),走向,倾角,倾向,岩性,备注\n")
             }
             for (r in records) {
                 sb.append("\"").append(r.time).append("\",")
@@ -1372,9 +1403,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     sb.append("%.6f".format(r.latitude)).append(",")
                     sb.append("%.6f".format(r.longitude)).append(",")
                 } else {
-                    val (n, e) = CoordHelper.toGaussKruger(r.latitude, r.longitude, CoordHelper.getZone(this))
-                    sb.append("%.2f".format(n)).append(",")
-                    sb.append("%.2f".format(e)).append(",")
+                    val (x, y) = CoordHelper.toGaussKruger(r.latitude, r.longitude, CoordHelper.getZone(this))
+                    sb.append("%.0f".format(x)).append(",")
+                    sb.append("%.0f".format(y)).append(",")
                 }
                 sb.append("%.1f".format(r.altitude)).append(",")
                 sb.append("%.1f".format(r.strike)).append(",")
